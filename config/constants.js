@@ -22,7 +22,7 @@ export const FIELD_MAPPING = {
   title: "name", // Webflow uses 'name' for the title field
   slug: "slug",
   content: "content",
-  desc: "excerpt",
+  desc: "desc", // Rich text field for standfirst HTML content
   timestamp: "published",
   updatedDate: "last-updated", // NEW: for smart sync
   cat: "category", // Multi-reference (will be converted to ID)
