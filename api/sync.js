@@ -1,108 +1,184 @@
 import "dotenv/config";
-import { getRecentPosts } from "../lib/engine-api.js";
+import { getRecentPosts } from "../lib/api/engine.js";
 import {
-  getWebflowItemByEngineId,
-  createWebflowItem,
-  updateWebflowItem,
-  transformEngineDataToWebflow,
-  publishWebflowItems,
-} from "../lib/webflow-api.js";
-import { logWithTimestamp, validateEngineData } from "../lib/utils.js";
+  findItemByPostId,
+  createItem,
+  updateItem,
+  publishItems,
+  createWebflowClient,
+} from "../lib/api/webflow.js";
+import ReferenceManager from "../lib/reference.js";
+import {
+  transformEngineToWebflow,
+  needsUpdate,
+  validateArticle,
+} from "../lib/transformer.js";
+import { WEBFLOW_COLLECTIONS, SYNC_CONFIG } from "../config/constants.js";
+import { logWithTimestamp } from "../lib/utils.js";
 
-// This function contains the core sync logic to be reused by the webhook.
-export async function runSync() {
-  const collectionId = process.env.WEBFLOW_COLLECTION_ID;
-  logWithTimestamp("Starting scheduled sync...");
+/**
+ * Core sync logic - reusable by cron and manual triggers
+ * @param {number} recentCount - Number of recent posts to sync (default: 20)
+ * @returns {Promise<object>} - Sync summary
+ */
+export async function runSync(recentCount = SYNC_CONFIG.DEFAULT_RECENT_COUNT) {
+  logWithTimestamp(`Starting sync for ${recentCount} recent posts...`);
 
   const summary = {
-    created: 0,
-    updated: 0,
-    skipped: 0,
-    errors: 0,
+    created: [],
+    updated: [],
+    skipped: [],
+    errors: [],
     errorDetails: [],
   };
 
   try {
-    // 1. Fetch recent articles from Engine API
-    const engineData = await getRecentPosts(20);
-    const articles = [
-      ...engineData.featured,
-      ...Object.values(engineData.recentNews).flat(),
-    ];
-    logWithTimestamp(`Fetched ${articles.length} recent articles from Engine.`);
+    // Initialize reference manager
+    const webflowClient = createWebflowClient();
+    const refManager = new ReferenceManager(webflowClient);
 
-    // 3. Process each Engine article
-    for (const engineArticle of articles) {
+    // 1. Fetch recent articles from Engine API v2
+    const engineArticles = await getRecentPosts(recentCount);
+
+    if (!engineArticles || !Array.isArray(engineArticles)) {
+      throw new Error(
+        "Invalid response from Engine API - expected array of articles",
+      );
+    }
+
+    logWithTimestamp(
+      `Fetched ${engineArticles.length} articles from Engine API`,
+    );
+
+    // 2. Process each article
+    for (const article of engineArticles) {
       try {
-        validateEngineData(engineArticle);
+        // 2a. Validate article data
+        validateArticle(article);
 
-        const existingItem = await getWebflowItemByEngineId(
-          collectionId,
-          engineArticle.postId,
+        // 2b. Ensure category exists (creates if needed)
+        logWithTimestamp(
+          `Processing article: ${article.postId} - "${article.title}"`,
         );
-        const webflowData = transformEngineDataToWebflow(engineArticle);
+        const categoryId = await refManager.ensureCategoryExists(
+          article.cat,
+          article.color,
+        );
 
-        if (existingItem) {
-          // 4a. Update existing item
-          logWithTimestamp(
-            `Updating item for Engine post ID: ${engineArticle.postId}`,
-          );
-          const updatedItem = await updateWebflowItem(
-            collectionId,
+        // 2c. Ensure tags exist (batch operation)
+        const tagIds = await refManager.ensureTagsExist(article.tags || []);
+
+        // 2d. Check if article exists in Webflow
+        const existingItem = await findItemByPostId(article.postId);
+
+        // 2e. Transform Engine data to Webflow format
+        const webflowData = transformEngineToWebflow(article, {
+          categoryId,
+          tagIds,
+        });
+
+        // 2f. Create or update
+        if (!existingItem) {
+          // Create new article
+          logWithTimestamp(`✓ Creating new article: ${article.postId}`);
+          const createdItem = await createItem(WEBFLOW_COLLECTIONS.NEWS, {
+            ...webflowData,
+            isArchived: false,
+            isDraft: false, // Auto-publish
+          });
+
+          // Publish immediately
+          await publishItems(WEBFLOW_COLLECTIONS.NEWS, [createdItem.id]);
+          summary.created.push(article.postId);
+        } else if (needsUpdate(existingItem, article)) {
+          // Update existing article
+          logWithTimestamp(`✓ Updating article: ${article.postId}`);
+          const updatedItem = await updateItem(
+            WEBFLOW_COLLECTIONS.NEWS,
             existingItem.id,
             webflowData,
           );
-          await publishWebflowItems(collectionId, [updatedItem.id]);
-          summary.updated++;
+
+          // Publish update
+          await publishItems(WEBFLOW_COLLECTIONS.NEWS, [updatedItem.id]);
+          summary.updated.push(article.postId);
         } else {
-          // 4b. Create new item
+          // No update needed
           logWithTimestamp(
-            `Creating new item for Engine post ID: ${engineArticle.postId}`,
+            `✓ Skipping article (no changes): ${article.postId}`,
           );
-          const createdItem = await createWebflowItem(
-            collectionId,
-            webflowData,
-          );
-          await publishWebflowItems(collectionId, [createdItem.id]);
-          summary.created++;
+          summary.skipped.push(article.postId);
         }
       } catch (error) {
-        summary.errors++;
+        summary.errors.push(article.postId);
         summary.errorDetails.push({
-          postId: engineArticle.postId,
+          postId: article.postId,
+          title: article.title,
           error: error.message,
         });
         logWithTimestamp(
-          `Error processing post ID ${engineArticle.postId}: ${error.message}`,
+          `✗ Error processing article ${article.postId}: ${error.message}`,
           "error",
         );
       }
     }
+
+    // 3. Log cache statistics
+    const cacheStats = refManager.getCacheStats();
+    logWithTimestamp(
+      `Cache stats: ${cacheStats.categories} categories, ${cacheStats.tags} tags cached`,
+    );
   } catch (error) {
     logWithTimestamp(`Catastrophic sync failure: ${error.message}`, "error");
-    // In a real-world scenario, an email alert would be sent here.
-    summary.errors++;
     summary.errorDetails.push({ generalError: error.message });
-    throw new Error(`Sync failed: ${error.message}`);
+    throw error;
   }
 
+  // 4. Final summary
   logWithTimestamp(
-    `Sync finished. Created: ${summary.created}, Updated: ${summary.updated}, Errors: ${summary.errors}`,
+    `Sync complete - Created: ${summary.created.length}, Updated: ${summary.updated.length}, Skipped: ${summary.skipped.length}, Errors: ${summary.errors.length}`,
   );
+
   return summary;
 }
 
+/**
+ * Vercel serverless function handler
+ * @param {object} req - Request object
+ * @param {object} res - Response object
+ */
 export default async function handler(req, res) {
   try {
-    const summary = await runSync();
+    // Allow custom recent count from request body (for manual syncs)
+    const recentCount = req.body?.recent || SYNC_CONFIG.DEFAULT_RECENT_COUNT;
+
+    // Validate recent count
+    if (
+      typeof recentCount !== "number" ||
+      recentCount < 1 ||
+      recentCount > 100
+    ) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid recent count. Must be a number between 1 and 100.",
+      });
+    }
+
+    // Run sync
+    const summary = await runSync(recentCount);
+
     return res.status(200).json({
       success: true,
       ...summary,
       timestamp: new Date().toISOString(),
+      recentCount,
     });
   } catch (error) {
-    // Log error and potentially send an email alert
     logWithTimestamp(`Sync handler failed: ${error.message}`, "error");
-    return res.status(500).json({ success: false, error: error.message });
+    return res.status(500).json({
+      success: false,
+      error: error.message,
+      timestamp: new Date().toISOString(),
+    });
   }
 }

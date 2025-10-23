@@ -1,6 +1,7 @@
 import "dotenv/config";
-import { getRecentPosts } from "../lib/engine-api.js";
-import { getWebflowItems } from "../lib/webflow-api.js";
+import { getRecentPosts } from "../lib/api/engine.js";
+import { listItems } from "../lib/api/webflow.js";
+import { WEBFLOW_COLLECTIONS } from "../config/constants.js";
 import { logWithTimestamp } from "../lib/utils.js";
 
 export default async function handler(req, res) {
@@ -26,9 +27,8 @@ export default async function handler(req, res) {
 
   // 2. Test Webflow API connectivity
   try {
-    const collectionId = process.env.WEBFLOW_COLLECTION_ID;
     // Fetching 1 item is a good way to test token, site, and collection ID validity.
-    await getWebflowItems(collectionId, 0, 1);
+    await listItems(WEBFLOW_COLLECTIONS.NEWS, { offset: 0, limit: 1 });
     healthStatus.webflow_api = "healthy";
     logWithTimestamp("Webflow API health check successful.");
   } catch (error) {

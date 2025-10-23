@@ -4,11 +4,13 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "dev": "vercel dev"
+    "start": "node --experimental-modules api/sync.js",
+    "test": "node --experimental-modules api/monitor.js"
   },
   "dependencies": {
     "node-fetch": "^3.3.2",
-    "dotenv": "^16.3.1"
+    "dotenv": "^16.3.1",
+    "abort-controller": "^3.0.0"
   },
   "engines": {
     "node": "18.x"

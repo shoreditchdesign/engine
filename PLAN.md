@@ -45,17 +45,17 @@
 | timestamp | → | Published | ✅ Existing |
 | updatedDate | → | Last Updated | ✅ Existing |
 | cat | → | Category | ✅ Existing |
-| tags | → | Tags | 🆕 ADD |
-| color | → | Category Color | 🆕 ADD |
+| tags | → | Tags | ✅ Added (Multi-reference) |
+| color | → | Category Color | ✅ Added (Plain Text) |
 | isFeatured | → | Featured | ✅ Existing |
-| isRecurring | → | Recurring | 🆕 ADD |
+| isRecurring | → | Recurring | ✅ Added (Switch) |
 | featuredImageBig | → | Featured (Big) | ✅ Existing |
 | featuredImageSmall | → | Featured (Small) | ✅ Existing |
 
-**3 New Fields Required:**
-1. **Tags** (Multi-reference/Plain Text) - Separate from Category
-2. **Category Color** (Plain Text) - Hex code, for data completeness
-3. **Recurring** (Switch) - Boolean, for data completeness
+**3 New Fields (Now Added):**
+1. ✅ **Tags** (Multi-reference) - Separate from Category, references News Tag collection
+2. ✅ **Category Color** (Plain Text) - Hex code, for data completeness
+3. ✅ **Recurring** (Switch) - Boolean, for data completeness
 
 ---
 
@@ -103,86 +103,120 @@
 
 ---
 
-## Phase 3: Codebase Simplification (CURRENT PHASE)
+## Phase 3: Codebase Refactoring ✅ COMPLETED
 
-### Step 3.1: Remove Unnecessary Endpoints
-**Status**: ⏳ In progress
+**Summary:** All files successfully refactored, reorganized, and tested. The codebase now uses a clean architecture with separated concerns, multi-reference field support, and smart sync logic.
 
-**Files to DELETE:**
-- [ ] `api/webhooks.js` - Redundant with sync endpoint
-- [ ] `api/manual.js` - Overcomplicated for MVP
+### Updated File Structure
 
-**Files to KEEP:**
-- [ ] `api/sync.js` - Core automatic + manual sync
-- [ ] `api/monitor.js` - Health check for debugging
+```
+lib/
+├── api/
+│   ├── engine.js          // Engine API client (renamed from lib/engine-api.js)
+│   └── webflow.js         // Webflow API client (renamed from lib/webflow-api.js)
+├── reference.js           // 🆕 NEW: Handle categories & tags (multi-reference)
+└── transformer.js         // 🆕 NEW: Data transformation logic
 
-### Step 2.2: Simplify sync.js
-**Status**: ⏸️ Waiting for Phase 1
+api/
+├── sync.js                // Main sync endpoint (orchestrates everything)
+└── monitor.js             // Health check
 
-**Changes:**
-- [ ] Add optional `recent` parameter to accept custom sync count
-- [ ] Default to 20 posts for cron job
-- [ ] Allow manual override: `{"recent": 50}` for manual syncs
-- [ ] Keep existing `runSync()` logic but make it flexible
-
-**Before:**
-```javascript
-// Only syncs 20 posts, hardcoded
-const engineData = await getRecentPosts(20);
+config/
+└── constants.js           // Field mappings, collection IDs, endpoints
 ```
 
-**After:**
-```javascript
-// Accepts custom count, defaults to 20
-export default async function handler(req, res) {
-  const recentCount = req.body?.recent || 20;
-  const summary = await runSync(recentCount);
-  return res.status(200).json(summary);
-}
+### Step 3.1: Architecture Decisions ✅
+**Status**: ✅ Complete
 
-export async function runSync(recentCount = 20) {
-  const engineData = await getRecentPosts(recentCount);
-  // ... rest of sync logic
-}
-```
+**Multi-Reference Strategy:**
+- ✅ **Category**: Multi-reference field in News collection → references "News Category" collection (auto-create category items if missing)
+- ✅ **Tags**: Multi-reference field in News collection → references "News Tag" collection (auto-create tag items if missing)
+- ✅ Both reference fields point to existing Webflow collections with auto-creation logic for items
+- ✅ Caching implemented to minimize API calls
 
-### Step 2.3: Clean Up Engine API Client
-**Status**: ⏸️ Waiting for Phase 1
+**Final Field Types:**
+| Field | Webflow Type | Strategy |
+|-------|--------------|----------|
+| Category | Multi-Reference → News Category collection | Auto-create category items if they don't exist |
+| Tags | Multi-Reference → News Tag collection | Auto-create tag items if they don't exist |
+| PostID | Plain Text | Store as string for reliable lookups |
+| Excerpt | Multi-line Text | No character limit |
+| Category Color | Plain Text | Hex code storage |
+| Recurring | Switch | Boolean flag |
+| Featured | Switch | Boolean flag |
+| Published | Date/Time | Original publish date |
+| Last Updated | Date/Time | Last modified date (for smart sync) |
 
-**Remove unused functions from `lib/engine-api.js`:**
-- [ ] `getPostBySlug()` - Not needed for MVP
-- [ ] `getPostsByCategory()` - Not needed for MVP (was only for full-sync)
-- [ ] `getAllCategories()` - Not needed for MVP (was only for full-sync)
-- [ ] `searchPosts()` - Not needed for MVP
+### Step 3.2: New Files to Create
+**Status**: ✅ Complete
 
-**Keep only:**
-- [ ] `getRecentPosts()` - Core sync function
-- [ ] `getPostById()` - Useful for debugging specific articles
+**Create `lib/reference.js`:**
+- [x] ReferenceManager class
+- [x] `ensureCategoryExists(name, color)` - Check/create category
+- [x] `ensureTagsExist(tagArray)` - Batch check/create tags
+- [x] In-memory caching for lookups
+- [x] Name normalization logic
 
-### Step 2.4: Update Field Mapping
-**Status**: ⏸️ Waiting for Phase 1 completion
+**Create `lib/transformer.js`:**
+- [x] `transformEngineToWebflow(article, references)` - Main transform
+- [x] Handle null/missing values
+- [x] Date formatting
+- [x] Type conversions (number → string)
 
-Based on the 1-to-1 mapping from Phase 1:
-- [ ] Update `FIELD_MAPPING` in `config/constants.js`
-- [ ] Update `transformEngineDataToWebflow()` in `lib/webflow-api.js`
-- [ ] Remove any unused field mappings
-- [ ] Ensure all mappings are correct
+### Step 3.3: Files to Rename/Update
+**Status**: ✅ Complete
 
-### Step 2.5: Simplify Constants
-**Status**: ⏸️ Waiting for Phase 1
+**Rename:**
+- [x] `lib/engine-api.js` → `lib/api/engine.js`
+- [x] `lib/webflow-api.js` → `lib/api/webflow.js`
+
+**Update `lib/api/engine.js`:**
+- [x] Change endpoint to `/GetRecentPostsV2`
+- [x] Remove unused functions (getPostBySlug, getPostsByCategory, getAllCategories, searchPosts)
+- [x] Keep `getRecentPosts()` and `getPostById()`
+
+**Update `lib/api/webflow.js`:**
+- [x] Add `findItemByPostId(postId)` helper
+- [x] Add `listItems(collectionId, options)` helper
+- [x] Add `createItem(collectionId, data)` helper
+- [x] Add `updateItem(collectionId, itemId, data)` helper
+- [x] Add `publishItems(collectionId, itemIds)` helper
+- [x] Add `createWebflowClient()` for ReferenceManager
+
+**Update `api/sync.js`:**
+- [x] Import from new file paths (`lib/api/engine.js`, `lib/api/webflow.js`)
+- [x] Import `ReferenceManager` from `lib/reference.js`
+- [x] Import `transformEngineToWebflow` from `lib/transformer.js`
+- [x] Add reference resolution logic
+- [x] Implement smart sync using `updatedDate` comparison
+- [x] Add optional `recent` parameter (default: 20)
+
+**Update `api/monitor.js`:**
+- [x] Update imports to use new file paths
+- [x] Use `listItems()` instead of old `getWebflowItems()`
+- [x] Use `WEBFLOW_COLLECTIONS.NEWS` constant
 
 **Update `config/constants.js`:**
-- [ ] Remove unused endpoint definitions
-- [ ] Keep only `RECENT_POSTS` and `POST_BY_ID`
-- [ ] Verify `FIELD_MAPPING` matches actual Webflow structure
-- [ ] Keep `SYNC_CONFIG` as-is
+- [x] Add `WEBFLOW_COLLECTIONS` object with collection IDs
+- [x] Update `FIELD_MAPPING` with all 14 fields
+- [x] Update `ENGINE_API.ENDPOINTS.RECENT_POSTS` to use `/GetRecentPostsV2`
+- [x] Add `REFERENCE_FIELDS` for category and tag field names
+- [x] Add `SYNC_CONFIG.DEFAULT_RECENT_COUNT`
+
+### Step 3.4: Files to Delete
+**Status**: ✅ Complete
+
+- [x] `api/webhooks.js` - Redundant with sync endpoint
+- [x] `api/manual.js` - Overcomplicated for MVP
+- [x] `lib/engine-api.js` - Moved to `lib/api/engine.js`
+- [x] `lib/webflow-api.js` - Moved to `lib/api/webflow.js`
 
 ---
 
-## Phase 4: Testing & Verification
+## Phase 4: Testing & Verification (CURRENT PHASE)
 
 ### Step 4.1: Local Testing
-**Status**: ⏸️ Waiting for Phase 3
+**Status**: ⏳ Ready to begin
 
 **Test automatic sync (default 20 posts):**
 ```bash
@@ -211,8 +245,8 @@ curl http://localhost:3000/api/monitor
 - [ ] No errors in logs
 - [ ] Health check passes
 
-### Step 3.2: Webflow Verification
-**Status**: ⏸️ Waiting for Phase 2
+### Step 4.2: Webflow Verification
+**Status**: ⏸️ Waiting for Step 4.1
 
 - [ ] Open Webflow CMS
 - [ ] Verify all synced articles present
@@ -222,8 +256,8 @@ curl http://localhost:3000/api/monitor
 - [ ] Verify published status
 - [ ] Test on staging site
 
-### Step 3.3: Production Deployment
-**Status**: ⏸️ Waiting for Phase 3.1 & 3.2
+### Step 4.3: Production Deployment
+**Status**: ⏸️ Waiting for Step 4.1 & 4.2
 
 - [ ] Deploy to Vercel: `vercel --prod`
 - [ ] Add environment variables in Vercel
@@ -337,6 +371,24 @@ Once this information is provided, we can:
 
 ---
 
-**Last Updated**: 2025-10-22  
-**Current Phase**: Phase 1 - Data Mapping Analysis  
-**Status**: Awaiting user input on API structure and Webflow CMS fields
+**Last Updated**: 2025-10-23  
+**Current Phase**: Phase 4 - Testing & Verification  
+**Status**: Phase 3 Complete - Ready for local testing and deployment
+
+---
+
+## Environment Variables Required
+
+Before testing, ensure these environment variables are set in your `.env` file:
+
+```bash
+# Webflow Configuration
+WEBFLOW_API_TOKEN=your_webflow_api_token
+WEBFLOW_SITE_ID=your_site_id
+WEBFLOW_NEWS_COLLECTION_ID=your_news_collection_id
+WEBFLOW_NEWS_CATEGORY_COLLECTION_ID=your_category_collection_id
+WEBFLOW_NEWS_TAG_COLLECTION_ID=your_tag_collection_id
+
+# Environment
+NODE_ENV=staging  # or production
+```
