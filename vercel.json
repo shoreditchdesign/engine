@@ -2,12 +2,19 @@
   "functions": {
     "api/sync.js": {
       "maxDuration": 30
+    },
+    "api/archive.js": {
+      "maxDuration": 30
     }
   },
   "crons": [
     {
       "path": "/api/sync",
       "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/archive",
+      "schedule": "0 2 * * *"
     }
   ]
 }

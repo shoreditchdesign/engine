@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { getRecentPosts } from "../lib/api/engine.js";
+import { getRecentPosts, getPostById } from "../lib/api/engine.js";
 import {
   findItemByPostId,
   createItem,
@@ -56,58 +56,117 @@ export async function runSync(recentCount = SYNC_CONFIG.DEFAULT_RECENT_COUNT) {
         // 2a. Validate article data
         validateArticle(article);
 
-        // 2b. Ensure category exists (creates if needed)
         logWithTimestamp(
           `Processing article: ${article.postId} - "${article.title}"`,
         );
+
+        // 2b. Fetch full article content (includes the body/content field)
+        logWithTimestamp(`  → Fetching full content for ${article.postId}...`);
+        const fullArticle = await getPostById(article.postId);
+
+        // Merge full article data with the list data (full article has content field)
+        const completeArticle = { ...article, ...fullArticle };
+
+        // 2c. Ensure category exists (creates if needed)
         const categoryId = await refManager.ensureCategoryExists(
-          article.cat,
-          article.color,
+          completeArticle.cat,
+          completeArticle.color,
         );
 
-        // 2c. Ensure tags exist (batch operation)
-        const tagIds = await refManager.ensureTagsExist(article.tags || []);
+        // 2d. Ensure tags exist (batch operation)
+        const tagIds = await refManager.ensureTagsExist(
+          completeArticle.tags || [],
+        );
 
-        // 2d. Check if article exists in Webflow
-        const existingItem = await findItemByPostId(article.postId);
+        // 2e. Check if article exists in Webflow
+        const existingItem = await findItemByPostId(completeArticle.postId);
 
-        // 2e. Transform Engine data to Webflow format
-        const webflowData = transformEngineToWebflow(article, {
+        // 2f. Transform Engine data to Webflow format
+        const webflowData = transformEngineToWebflow(completeArticle, {
           categoryId,
           tagIds,
         });
 
-        // 2f. Create or update
+        // 2g. Create or update
         if (!existingItem) {
           // Create new article
-          logWithTimestamp(`✓ Creating new article: ${article.postId}`);
-          const createdItem = await createItem(WEBFLOW_COLLECTIONS.NEWS, {
-            ...webflowData,
-            isArchived: false,
-            isDraft: false, // Auto-publish
-          });
+          logWithTimestamp(`✓ Creating new article: ${completeArticle.postId}`);
 
-          // Publish immediately
-          await publishItems(WEBFLOW_COLLECTIONS.NEWS, [createdItem.id]);
-          summary.created.push(article.postId);
-        } else if (needsUpdate(existingItem, article)) {
+          try {
+            const createdItem = await createItem(WEBFLOW_COLLECTIONS.NEWS, {
+              ...webflowData,
+              isArchived: false,
+              isDraft: false, // Auto-publish
+            });
+
+            // Publish immediately
+            await publishItems(WEBFLOW_COLLECTIONS.NEWS, [createdItem.id]);
+            summary.created.push(completeArticle.postId);
+          } catch (createError) {
+            // Check if it's a slug conflict error
+            if (
+              createError.message.includes("slug") &&
+              createError.message.includes(
+                "Unique value is already in database",
+              )
+            ) {
+              logWithTimestamp(
+                `  ⚠ Slug conflict detected, retrying with hashed slug...`,
+                "warn",
+              );
+
+              // Retry with hashed slug
+              const webflowDataWithHash = transformEngineToWebflow(
+                completeArticle,
+                {
+                  categoryId,
+                  tagIds,
+                },
+                true,
+              ); // Pass true to append hash to slug
+
+              const createdItem = await createItem(WEBFLOW_COLLECTIONS.NEWS, {
+                ...webflowDataWithHash,
+                isArchived: false,
+                isDraft: false,
+              });
+
+              await publishItems(WEBFLOW_COLLECTIONS.NEWS, [createdItem.id]);
+              summary.created.push(completeArticle.postId);
+              logWithTimestamp(
+                `  ✓ Created with modified slug: ${webflowDataWithHash.fieldData.slug}`,
+              );
+            } else {
+              throw createError; // Re-throw if it's not a slug conflict
+            }
+          }
+        } else if (needsUpdate(existingItem, completeArticle)) {
           // Update existing article
-          logWithTimestamp(`✓ Updating article: ${article.postId}`);
+          logWithTimestamp(`✓ Updating article: ${completeArticle.postId}`);
+
+          // Generate update data WITHOUT slug to avoid Webflow conflicts
+          const updateData = transformEngineToWebflow(
+            completeArticle,
+            { categoryId, tagIds },
+            false, // useHashedSlug = false
+            true, // excludeSlug = true (don't send slug on updates)
+          );
+
           const updatedItem = await updateItem(
             WEBFLOW_COLLECTIONS.NEWS,
             existingItem.id,
-            webflowData,
+            updateData,
           );
 
           // Publish update
           await publishItems(WEBFLOW_COLLECTIONS.NEWS, [updatedItem.id]);
-          summary.updated.push(article.postId);
+          summary.updated.push(completeArticle.postId);
         } else {
           // No update needed
           logWithTimestamp(
-            `✓ Skipping article (no changes): ${article.postId}`,
+            `✓ Skipping article (no changes): ${completeArticle.postId}`,
           );
-          summary.skipped.push(article.postId);
+          summary.skipped.push(completeArticle.postId);
         }
       } catch (error) {
         summary.errors.push(article.postId);
@@ -181,4 +240,53 @@ export default async function handler(req, res) {
       timestamp: new Date().toISOString(),
     });
   }
+}
+
+/**
+ * CLI execution handler
+ * Run with: npm run sync [count]
+ * Example: npm run sync 50
+ */
+if (import.meta.url === `file://${process.argv[1]}`) {
+  const recentCount =
+    parseInt(process.argv[2]) || SYNC_CONFIG.DEFAULT_RECENT_COUNT;
+
+  logWithTimestamp(`=== Sync CLI Mode ===`);
+  logWithTimestamp(`Recent count: ${recentCount}`);
+
+  runSync(recentCount)
+    .then((summary) => {
+      logWithTimestamp(`\n=== Sync Summary ===`);
+      logWithTimestamp(`Created: ${summary.created.length}`);
+      logWithTimestamp(`Updated: ${summary.updated.length}`);
+      logWithTimestamp(`Skipped: ${summary.skipped.length}`);
+      logWithTimestamp(`Errors: ${summary.errors.length}`);
+
+      if (summary.created.length > 0) {
+        logWithTimestamp(`\nCreated articles:`);
+        summary.created.forEach((postId) => {
+          logWithTimestamp(`  - ${postId}`);
+        });
+      }
+
+      if (summary.updated.length > 0) {
+        logWithTimestamp(`\nUpdated articles:`);
+        summary.updated.forEach((postId) => {
+          logWithTimestamp(`  - ${postId}`);
+        });
+      }
+
+      if (summary.errors.length > 0) {
+        logWithTimestamp(`\nErrors:`, "error");
+        summary.errorDetails.forEach((err) => {
+          logWithTimestamp(`  - ${err.postId}: ${err.error}`, "error");
+        });
+      }
+
+      process.exit(summary.errors.length > 0 ? 1 : 0);
+    })
+    .catch((error) => {
+      logWithTimestamp(`Fatal error: ${error.message}`, "error");
+      process.exit(1);
+    });
 }

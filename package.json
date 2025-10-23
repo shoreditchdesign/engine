@@ -4,8 +4,9 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "start": "node --experimental-modules api/sync.js",
-    "test": "node --experimental-modules api/monitor.js"
+    "sync": "node --experimental-modules api/sync.js",
+    "archive": "node --experimental-modules api/archive.js",
+    "test": "node --experimental-modules api/test.js"
   },
   "dependencies": {
     "node-fetch": "^3.3.2",
