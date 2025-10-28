@@ -28,7 +28,6 @@ const __dirname = dirname(__filename);
 async function loadTestArticles() {
   const localDir = join(__dirname, "..", "local");
   const testFilePath = join(localDir, "test.json");
-  logWithTimestamp(`Loading test articles from: ${testFilePath}`);
 
   try {
     const content = await fs.readFile(testFilePath, "utf-8");
@@ -38,14 +37,8 @@ async function loadTestArticles() {
       throw new Error("test.json must contain an array of articles");
     }
 
-    logWithTimestamp(`Loaded ${articles.length} test articles`);
-    articles.forEach((article) => {
-      logWithTimestamp(`  ✓ Article: ${article.postId} - "${article.title}"`);
-    });
-
     return articles;
   } catch (error) {
-    logWithTimestamp(`Error loading test articles: ${error.message}`, "error");
     throw error;
   }
 }
@@ -55,7 +48,7 @@ async function loadTestArticles() {
  * @returns {Promise<object>} - Sync summary
  */
 export async function runTestSync() {
-  logWithTimestamp(`Starting TEST sync using local JSON files...`);
+  console.log(`Starting test sync (local JSON)...`);
 
   const summary = {
     created: [],
@@ -77,8 +70,6 @@ export async function runTestSync() {
       throw new Error("Failed to load test articles - expected array");
     }
 
-    logWithTimestamp(`Loaded ${engineArticles.length} test articles`);
-
     // 2. Process each article
     for (const article of engineArticles) {
       try {
@@ -86,9 +77,6 @@ export async function runTestSync() {
         validateArticle(article);
 
         // 2b. Ensure category exists (creates if needed)
-        logWithTimestamp(
-          `Processing article: ${article.postId} - "${article.title}"`,
-        );
         const categoryId = await refManager.ensureCategoryExists(
           article.cat,
           article.color,
@@ -109,8 +97,6 @@ export async function runTestSync() {
         // 2f. Create or update
         if (!existingItem) {
           // Create new article
-          logWithTimestamp(`✓ Creating new article: ${article.postId}`);
-
           try {
             const createdItem = await createItem(WEBFLOW_COLLECTIONS.NEWS, {
               ...webflowData,
@@ -129,12 +115,12 @@ export async function runTestSync() {
                 "Unique value is already in database",
               )
             ) {
+              // Retry with hashed slug
               logWithTimestamp(
-                `  ⚠ Slug conflict detected, retrying with hashed slug...`,
+                `⚠ Slug conflict for article ${article.postId}, auto-resolving...`,
                 "warn",
               );
 
-              // Retry with hashed slug
               const webflowDataWithHash = transformEngineToWebflow(
                 article,
                 {
@@ -152,16 +138,12 @@ export async function runTestSync() {
 
               await publishItems(WEBFLOW_COLLECTIONS.NEWS, [createdItem.id]);
               summary.created.push(article.postId);
-              logWithTimestamp(
-                `  ✓ Created with modified slug: ${webflowDataWithHash.fieldData.slug}`,
-              );
             } else {
               throw createError; // Re-throw if it's not a slug conflict
             }
           }
         } else if (needsUpdate(existingItem, article)) {
           // Update existing article
-          logWithTimestamp(`✓ Updating article: ${article.postId}`);
 
           // Generate update data WITHOUT slug to avoid Webflow conflicts
           const updateData = transformEngineToWebflow(
@@ -182,9 +164,6 @@ export async function runTestSync() {
           summary.updated.push(article.postId);
         } else {
           // No update needed
-          logWithTimestamp(
-            `✓ Skipping article (no changes): ${article.postId}`,
-          );
           summary.skipped.push(article.postId);
         }
       } catch (error) {
@@ -195,30 +174,31 @@ export async function runTestSync() {
           error: error.message,
         });
         logWithTimestamp(
-          `✗ Error processing article ${article.postId}: ${error.message}`,
+          `✗ Error syncing article ${article.postId}: ${error.message}`,
           "error",
         );
       }
     }
-
-    // 3. Log cache statistics
-    const cacheStats = refManager.getCacheStats();
-    logWithTimestamp(
-      `Cache stats: ${cacheStats.categories} categories, ${cacheStats.tags} tags cached`,
-    );
   } catch (error) {
-    logWithTimestamp(
-      `Catastrophic test sync failure: ${error.message}`,
-      "error",
-    );
+    logWithTimestamp(`✗ Test sync failed: ${error.message}`, "error");
     summary.errorDetails.push({ generalError: error.message });
     throw error;
   }
 
   // 4. Final summary
-  logWithTimestamp(
-    `Test sync complete - Created: ${summary.created.length}, Updated: ${summary.updated.length}, Skipped: ${summary.skipped.length}, Errors: ${summary.errors.length}`,
-  );
+  if (summary.errors.length === 0) {
+    console.log(
+      `✓ Test complete: Created ${summary.created.length} | Updated ${summary.updated.length} | Skipped ${summary.skipped.length} | Errors 0`,
+    );
+  } else {
+    console.log(
+      `✓ Test complete: Created ${summary.created.length} | Updated ${summary.updated.length} | Skipped ${summary.skipped.length} | Errors ${summary.errors.length}`,
+    );
+    console.log(`\nFailed articles:`);
+    summary.errorDetails.forEach((err) => {
+      console.log(`  - ${err.postId}: ${err.error}`);
+    });
+  }
 
   return summary;
 }
@@ -255,42 +235,12 @@ export default async function handler(req, res) {
  * Run with: npm test
  */
 if (import.meta.url === `file://${process.argv[1]}`) {
-  logWithTimestamp(`=== Test Sync CLI Mode ===`);
-  logWithTimestamp(`Using local test.json from /local directory`);
-
   runTestSync()
     .then((summary) => {
-      logWithTimestamp(`\n=== Test Sync Summary ===`);
-      logWithTimestamp(`Created: ${summary.created.length}`);
-      logWithTimestamp(`Updated: ${summary.updated.length}`);
-      logWithTimestamp(`Skipped: ${summary.skipped.length}`);
-      logWithTimestamp(`Errors: ${summary.errors.length}`);
-
-      if (summary.created.length > 0) {
-        logWithTimestamp(`\nCreated articles:`);
-        summary.created.forEach((postId) => {
-          logWithTimestamp(`  - ${postId}`);
-        });
-      }
-
-      if (summary.updated.length > 0) {
-        logWithTimestamp(`\nUpdated articles:`);
-        summary.updated.forEach((postId) => {
-          logWithTimestamp(`  - ${postId}`);
-        });
-      }
-
-      if (summary.errors.length > 0) {
-        logWithTimestamp(`\nErrors:`, "error");
-        summary.errorDetails.forEach((err) => {
-          logWithTimestamp(`  - ${err.postId}: ${err.error}`, "error");
-        });
-      }
-
       process.exit(summary.errors.length > 0 ? 1 : 0);
     })
     .catch((error) => {
-      logWithTimestamp(`Fatal error: ${error.message}`, "error");
+      console.error(`✗ Fatal error: ${error.message}`);
       process.exit(1);
     });
 }

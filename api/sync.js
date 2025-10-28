@@ -22,7 +22,7 @@ import { logWithTimestamp } from "../lib/utils.js";
  * @returns {Promise<object>} - Sync summary
  */
 export async function runSync(recentCount = SYNC_CONFIG.DEFAULT_RECENT_COUNT) {
-  logWithTimestamp(`Starting sync for ${recentCount} recent posts...`);
+  console.log(`Starting sync (${recentCount} posts)...`);
 
   const summary = {
     created: [],
@@ -46,22 +46,13 @@ export async function runSync(recentCount = SYNC_CONFIG.DEFAULT_RECENT_COUNT) {
       );
     }
 
-    logWithTimestamp(
-      `Fetched ${engineArticles.length} articles from Engine API`,
-    );
-
     // 2. Process each article
     for (const article of engineArticles) {
       try {
         // 2a. Validate article data
         validateArticle(article);
 
-        logWithTimestamp(
-          `Processing article: ${article.postId} - "${article.title}"`,
-        );
-
         // 2b. Fetch full article content (includes the body/content field)
-        logWithTimestamp(`  → Fetching full content for ${article.postId}...`);
         const fullArticle = await getPostById(article.postId);
 
         // Merge full article data with the list data (full article has content field)
@@ -90,8 +81,6 @@ export async function runSync(recentCount = SYNC_CONFIG.DEFAULT_RECENT_COUNT) {
         // 2g. Create or update
         if (!existingItem) {
           // Create new article
-          logWithTimestamp(`✓ Creating new article: ${completeArticle.postId}`);
-
           try {
             const createdItem = await createItem(WEBFLOW_COLLECTIONS.NEWS, {
               ...webflowData,
@@ -110,12 +99,12 @@ export async function runSync(recentCount = SYNC_CONFIG.DEFAULT_RECENT_COUNT) {
                 "Unique value is already in database",
               )
             ) {
+              // Retry with hashed slug
               logWithTimestamp(
-                `  ⚠ Slug conflict detected, retrying with hashed slug...`,
+                `⚠ Slug conflict for article ${completeArticle.postId}, auto-resolving...`,
                 "warn",
               );
 
-              // Retry with hashed slug
               const webflowDataWithHash = transformEngineToWebflow(
                 completeArticle,
                 {
@@ -133,16 +122,12 @@ export async function runSync(recentCount = SYNC_CONFIG.DEFAULT_RECENT_COUNT) {
 
               await publishItems(WEBFLOW_COLLECTIONS.NEWS, [createdItem.id]);
               summary.created.push(completeArticle.postId);
-              logWithTimestamp(
-                `  ✓ Created with modified slug: ${webflowDataWithHash.fieldData.slug}`,
-              );
             } else {
               throw createError; // Re-throw if it's not a slug conflict
             }
           }
         } else if (needsUpdate(existingItem, completeArticle)) {
           // Update existing article
-          logWithTimestamp(`✓ Updating article: ${completeArticle.postId}`);
 
           // Generate update data WITHOUT slug to avoid Webflow conflicts
           const updateData = transformEngineToWebflow(
@@ -163,9 +148,6 @@ export async function runSync(recentCount = SYNC_CONFIG.DEFAULT_RECENT_COUNT) {
           summary.updated.push(completeArticle.postId);
         } else {
           // No update needed
-          logWithTimestamp(
-            `✓ Skipping article (no changes): ${completeArticle.postId}`,
-          );
           summary.skipped.push(completeArticle.postId);
         }
       } catch (error) {
@@ -176,27 +158,31 @@ export async function runSync(recentCount = SYNC_CONFIG.DEFAULT_RECENT_COUNT) {
           error: error.message,
         });
         logWithTimestamp(
-          `✗ Error processing article ${article.postId}: ${error.message}`,
+          `✗ Error syncing article ${article.postId}: ${error.message}`,
           "error",
         );
       }
     }
-
-    // 3. Log cache statistics
-    const cacheStats = refManager.getCacheStats();
-    logWithTimestamp(
-      `Cache stats: ${cacheStats.categories} categories, ${cacheStats.tags} tags cached`,
-    );
   } catch (error) {
-    logWithTimestamp(`Catastrophic sync failure: ${error.message}`, "error");
+    logWithTimestamp(`✗ Sync failed: ${error.message}`, "error");
     summary.errorDetails.push({ generalError: error.message });
     throw error;
   }
 
   // 4. Final summary
-  logWithTimestamp(
-    `Sync complete - Created: ${summary.created.length}, Updated: ${summary.updated.length}, Skipped: ${summary.skipped.length}, Errors: ${summary.errors.length}`,
-  );
+  if (summary.errors.length === 0) {
+    console.log(
+      `✓ Sync complete: Created ${summary.created.length} | Updated ${summary.updated.length} | Skipped ${summary.skipped.length} | Errors 0`,
+    );
+  } else {
+    console.log(
+      `✓ Sync complete: Created ${summary.created.length} | Updated ${summary.updated.length} | Skipped ${summary.skipped.length} | Errors ${summary.errors.length}`,
+    );
+    console.log(`\nFailed articles:`);
+    summary.errorDetails.forEach((err) => {
+      console.log(`  - ${err.postId}: ${err.error}`);
+    });
+  }
 
   return summary;
 }
@@ -251,42 +237,12 @@ if (import.meta.url === `file://${process.argv[1]}`) {
   const recentCount =
     parseInt(process.argv[2]) || SYNC_CONFIG.DEFAULT_RECENT_COUNT;
 
-  logWithTimestamp(`=== Sync CLI Mode ===`);
-  logWithTimestamp(`Recent count: ${recentCount}`);
-
   runSync(recentCount)
     .then((summary) => {
-      logWithTimestamp(`\n=== Sync Summary ===`);
-      logWithTimestamp(`Created: ${summary.created.length}`);
-      logWithTimestamp(`Updated: ${summary.updated.length}`);
-      logWithTimestamp(`Skipped: ${summary.skipped.length}`);
-      logWithTimestamp(`Errors: ${summary.errors.length}`);
-
-      if (summary.created.length > 0) {
-        logWithTimestamp(`\nCreated articles:`);
-        summary.created.forEach((postId) => {
-          logWithTimestamp(`  - ${postId}`);
-        });
-      }
-
-      if (summary.updated.length > 0) {
-        logWithTimestamp(`\nUpdated articles:`);
-        summary.updated.forEach((postId) => {
-          logWithTimestamp(`  - ${postId}`);
-        });
-      }
-
-      if (summary.errors.length > 0) {
-        logWithTimestamp(`\nErrors:`, "error");
-        summary.errorDetails.forEach((err) => {
-          logWithTimestamp(`  - ${err.postId}: ${err.error}`, "error");
-        });
-      }
-
       process.exit(summary.errors.length > 0 ? 1 : 0);
     })
     .catch((error) => {
-      logWithTimestamp(`Fatal error: ${error.message}`, "error");
+      console.error(`✗ Fatal error: ${error.message}`);
       process.exit(1);
     });
 }

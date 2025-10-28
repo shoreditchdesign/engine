@@ -1,18 +1,29 @@
 import "dotenv/config";
+import { promises as fs } from "fs";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
 import { listItems, updateItem } from "../lib/api/webflow.js";
 import { WEBFLOW_COLLECTIONS, FIELD_MAPPING } from "../config/constants.js";
 import { logWithTimestamp } from "../lib/utils.js";
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+// Type IDs for News Category collection
+const CATEGORY_TYPE_IDS = {
+  NEWS: "7a4f21ce5613ba9be3a698eb86854dbc",
+  UPDATES: "12d3edad4c6c25a56749f664671e73e7",
+};
+
 /**
  * Archive articles older than 90 days based on last-updated date
+ * ONLY archives articles with category type "Updates"
  * Articles are unpublished and marked as archived
  * @param {number} daysThreshold - Number of days after which to archive (default: 90)
  * @returns {Promise<object>} - Archive summary
  */
 export async function runArchive(daysThreshold = 90) {
-  logWithTimestamp(
-    `Starting archive process for articles older than ${daysThreshold} days...`,
-  );
+  console.log(`Starting archive (${daysThreshold}+ days, Updates only)...`);
 
   const summary = {
     archived: [],
@@ -22,13 +33,13 @@ export async function runArchive(daysThreshold = 90) {
     totalChecked: 0,
   };
 
+  // Cache for category lookups (to avoid repeated API calls)
+  const categoryCache = new Map(); // { categoryId: { name, type } }
+
   try {
     // Calculate cutoff date (90 days ago from now)
     const cutoffDate = new Date();
     cutoffDate.setDate(cutoffDate.getDate() - daysThreshold);
-    logWithTimestamp(
-      `Cutoff date: ${cutoffDate.toISOString()} (${daysThreshold} days ago)`,
-    );
 
     // Fetch articles from Webflow sorted by lastPublished DESCENDING (newest first)
     // Check recent items to see if they need archiving
@@ -61,13 +72,13 @@ export async function runArchive(daysThreshold = 90) {
         try {
           const postId = item.fieldData[FIELD_MAPPING.postId];
           const lastPublished = item.lastPublished; // For sorting
-          const updatedDate = item.fieldData[FIELD_MAPPING.updatedDate]; // For age check (testing)
+          const updatedDate = item.fieldData[FIELD_MAPPING.updatedDate]; // For age check
+          const categoryId = item.fieldData[FIELD_MAPPING.cat]; // Category reference ID
           const isArchived = item.isArchived || false;
           const isDraft = item.isDraft || false;
 
           // Skip if already archived
           if (isArchived) {
-            logWithTimestamp(`⊘ Already archived: ${postId}`);
             summary.skipped.push({
               postId,
               reason: "already_archived",
@@ -77,10 +88,91 @@ export async function runArchive(daysThreshold = 90) {
 
           // Skip if missing updatedDate
           if (!updatedDate) {
-            logWithTimestamp(`⊘ Skipping (no updatedDate): ${postId}`, "warn");
             summary.skipped.push({
               postId,
               reason: "missing_date",
+            });
+            continue;
+          }
+
+          // Skip if no category
+          if (!categoryId) {
+            summary.skipped.push({
+              postId,
+              reason: "no_category",
+            });
+            continue;
+          }
+
+          // Fetch category to check type (with caching)
+          let category;
+          if (categoryCache.has(categoryId)) {
+            category = categoryCache.get(categoryId);
+          } else {
+            // Fetch all categories and find the one we need (inefficient but simple)
+            // TODO: Optimize by fetching category by ID directly if Webflow API supports it
+            let foundCategory = null;
+            let categoryOffset = 0;
+            const categoryLimit = 100;
+
+            while (!foundCategory) {
+              const categoryResponse = await listItems(
+                WEBFLOW_COLLECTIONS.NEWS_CATEGORY,
+                {
+                  offset: categoryOffset,
+                  limit: categoryLimit,
+                },
+              );
+
+              if (
+                !categoryResponse ||
+                !categoryResponse.items ||
+                categoryResponse.items.length === 0
+              ) {
+                break; // No more categories to check
+              }
+
+              // Find the specific category by ID
+              foundCategory = categoryResponse.items.find(
+                (c) => c.id === categoryId,
+              );
+
+              if (foundCategory) {
+                break;
+              }
+
+              // Check if there are more categories to fetch
+              if (
+                !categoryResponse.pagination ||
+                categoryOffset + categoryLimit >= categoryResponse.pagination.total
+              ) {
+                break;
+              }
+
+              categoryOffset += categoryLimit;
+            }
+
+            if (!foundCategory) {
+              summary.skipped.push({
+                postId,
+                reason: "category_not_found",
+              });
+              continue;
+            }
+
+            category = {
+              name: foundCategory.fieldData.name,
+              type: foundCategory.fieldData.type,
+            };
+            categoryCache.set(categoryId, category);
+          }
+
+          // Check if category type is "Updates"
+          if (category.type !== CATEGORY_TYPE_IDS.UPDATES) {
+            summary.skipped.push({
+              postId,
+              reason: "not_updates_type",
+              categoryName: category.name,
             });
             continue;
           }
@@ -91,12 +183,9 @@ export async function runArchive(daysThreshold = 90) {
           const isOld = articleDate < cutoffDate;
 
           if (isOld) {
-            // Found an item old enough to archive
+            // Found an item old enough to archive (and it's "Updates" type)
             const daysOld = Math.floor(
               (Date.now() - articleDate.getTime()) / (1000 * 60 * 60 * 24),
-            );
-            logWithTimestamp(
-              `✓ Archiving article ${postId} (${daysOld} days old, last updated: ${articleDate.toISOString()})`,
             );
 
             // Mark as archived (Webflow will automatically unpublish archived items)
@@ -105,29 +194,24 @@ export async function runArchive(daysThreshold = 90) {
               isArchived: true,
               isDraft: false,
             });
-            logWithTimestamp(`  → Archived: ${postId}`);
 
             summary.archived.push({
               postId,
               itemId: item.id,
+              title: item.fieldData[FIELD_MAPPING.title] || "Unknown",
+              category: category.name,
               lastUpdated: articleDate.toISOString(),
               daysOld,
             });
 
             // Since items are sorted newest first, everything older is already archived
             // Stop processing after archiving this item
-            logWithTimestamp(
-              `  → Stopping - all older items already archived from previous runs.`,
-            );
             shouldStopProcessing = true;
             break; // Exit the for loop
           } else {
             // Item is recent, continue checking
             const daysOld = Math.floor(
               (Date.now() - articleDate.getTime()) / (1000 * 60 * 60 * 24),
-            );
-            logWithTimestamp(
-              `⊘ Skipping (too recent): ${postId} (${daysOld} days old)`,
             );
             summary.skipped.push({
               postId,
@@ -144,7 +228,7 @@ export async function runArchive(daysThreshold = 90) {
             error: error.message,
           });
           logWithTimestamp(
-            `✗ Error archiving article ${postId}: ${error.message}`,
+            `✗ Error archiving ${postId}: ${error.message}`,
             "error",
           );
         }
@@ -152,11 +236,6 @@ export async function runArchive(daysThreshold = 90) {
 
       // Check if we should stop processing
       if (shouldStopProcessing) {
-        const remainingItems =
-          response.pagination?.total - offset - response.items.length || 0;
-        logWithTimestamp(
-          `Stopping archive process. Remaining ${remainingItems} items are already archived.`,
-        );
         hasMore = false;
         break;
       }
@@ -164,23 +243,75 @@ export async function runArchive(daysThreshold = 90) {
       // Check if there are more items to fetch
       if (response.pagination && offset + limit < response.pagination.total) {
         offset += limit;
-        logWithTimestamp(`Fetching next batch (offset: ${offset})...`);
       } else {
         hasMore = false;
       }
     }
 
+    // Write archived articles to log file
+    if (summary.archived.length > 0) {
+      await writeArchiveLog(summary.archived, daysThreshold);
+    }
+
     // Final summary
-    logWithTimestamp(
-      `Archive complete - Checked: ${summary.totalChecked}, Archived: ${summary.archived.length}, Skipped: ${summary.skipped.length}, Errors: ${summary.errors.length}`,
-    );
+    const logFileName = summary.archived.length > 0
+      ? `archived-${new Date().toISOString().split('T')[0]}.log`
+      : null;
+
+    if (summary.errors.length === 0) {
+      if (summary.archived.length > 0) {
+        console.log(`✓ Archived ${summary.archived.length} articles → /local/${logFileName}`);
+      } else {
+        console.log(`✓ Archive complete: No articles to archive`);
+      }
+    } else {
+      console.log(`✓ Archive complete: Archived ${summary.archived.length} | Errors ${summary.errors.length}`);
+      console.log(`\nFailed articles:`);
+      summary.errorDetails.forEach((err) => {
+        console.log(`  - ${err.postId}: ${err.error}`);
+      });
+    }
   } catch (error) {
-    logWithTimestamp(`Catastrophic archive failure: ${error.message}`, "error");
+    logWithTimestamp(`✗ Archive failed: ${error.message}`, "error");
     summary.errorDetails.push({ generalError: error.message });
     throw error;
   }
 
   return summary;
+}
+
+/**
+ * Write archived articles to a log file
+ * @param {Array} archivedArticles - Array of archived article objects
+ * @param {number} daysThreshold - Days threshold used for archiving
+ */
+async function writeArchiveLog(archivedArticles, daysThreshold) {
+  const logDir = join(__dirname, "..", "local");
+  const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
+  const logFilePath = join(logDir, `archived-${today}.log`);
+
+  const logData = {
+    timestamp: new Date().toISOString(),
+    daysThreshold,
+    archivedCount: archivedArticles.length,
+    archived: archivedArticles.map(article => ({
+      postId: article.postId,
+      title: article.title,
+      category: article.category,
+      lastUpdated: article.lastUpdated,
+      daysOld: article.daysOld,
+    })),
+  };
+
+  try {
+    // Ensure /local directory exists
+    await fs.mkdir(logDir, { recursive: true });
+
+    // Write log file
+    await fs.writeFile(logFilePath, JSON.stringify(logData, null, 2), "utf-8");
+  } catch (error) {
+    logWithTimestamp(`⚠ Failed to write archive log: ${error.message}`, "warn");
+  }
 }
 
 /**
@@ -232,35 +363,12 @@ export default async function handler(req, res) {
 if (import.meta.url === `file://${process.argv[1]}`) {
   const daysThreshold = parseInt(process.argv[2]) || 90;
 
-  logWithTimestamp(`=== Archive CLI Mode ===`);
-  logWithTimestamp(`Days threshold: ${daysThreshold}`);
-
   runArchive(daysThreshold)
     .then((summary) => {
-      logWithTimestamp(`\n=== Archive Summary ===`);
-      logWithTimestamp(`Total checked: ${summary.totalChecked}`);
-      logWithTimestamp(`Archived: ${summary.archived.length}`);
-      logWithTimestamp(`Skipped: ${summary.skipped.length}`);
-      logWithTimestamp(`Errors: ${summary.errors.length}`);
-
-      if (summary.archived.length > 0) {
-        logWithTimestamp(`\nArchived items:`);
-        summary.archived.forEach((item) => {
-          logWithTimestamp(`  - ${item.postId} (${item.daysOld} days old)`);
-        });
-      }
-
-      if (summary.errors.length > 0) {
-        logWithTimestamp(`\nErrors:`, "error");
-        summary.errorDetails.forEach((err) => {
-          logWithTimestamp(`  - ${err.postId}: ${err.error}`, "error");
-        });
-      }
-
       process.exit(summary.errors.length > 0 ? 1 : 0);
     })
     .catch((error) => {
-      logWithTimestamp(`Fatal error: ${error.message}`, "error");
+      console.error(`✗ Fatal error: ${error.message}`);
       process.exit(1);
     });
 }
