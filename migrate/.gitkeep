@@ -1,0 +1,2 @@
+# This file ensures the migrate directory is tracked in git
+# but the actual CSV and JSON files are ignored
