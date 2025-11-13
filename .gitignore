@@ -104,3 +104,7 @@ typings/
 
 # Vercel
 .vercel
+
+# Migration data
+migrate/export.csv
+migrate/export.json

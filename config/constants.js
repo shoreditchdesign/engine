@@ -30,8 +30,8 @@ export const FIELD_MAPPING = {
   color: "category-color",
   isFeatured: "featured",
   isRecurring: "recurring", // NEW
-  featuredImageBig: "featured-image-big",
-  featuredImageSmall: "featured-image-small",
+  featuredImageBig: "featured-img-big", // Image field (updated from Link field)
+  featuredImageSmall: "featured-img-small", // Image field (updated from Link field)
 
   // Sync metadata fields
   lastSynced: "last-synced",

@@ -936,6 +936,59 @@ vercel --prod
 
 ---
 
+## Migration
+
+For migrating large batches of historical articles (e.g., 9,000+ articles from CSV), use the dedicated migration tools:
+
+### Quick Start
+
+1. **Place your CSV file**: Copy your CSV to `migrate/export.csv`
+2. **Convert to JSON**: `npm run convert`
+3. **Run migration**: `npm run migrate`
+
+### Features
+- ✓ Real-time progress logging for each article
+- ✓ Automatic rate limiting (500ms delay between articles)
+- ✓ Error handling and retry logic
+- ✓ Resume capability for interrupted migrations
+- ✓ Batch progress summaries every 50 articles
+
+### Example Output
+```bash
+$ npm run migrate
+
+============================================================
+Starting migration (migrate/export.json)...
+Delay between articles: 500ms
+============================================================
+
+📦 Loaded 9000 articles to migrate
+
+✓ [1/9000] CREATED: "Article Title" (ID: 12345)
+✓ [2/9000] CREATED: "Another Article" (ID: 12346)
+○ [3/9000] SKIPPED: "Existing Article" (ID: 12347) - no changes
+↻ [4/9000] UPDATED: "Updated Article" (ID: 12348)
+
+📊 Progress: 50/9000 | Rate: 1.89 articles/sec | Elapsed: 26.5s
+...
+```
+
+### Custom Options
+```bash
+# Faster processing (250ms delay)
+npm run migrate -- --delay=250
+
+# Slower processing (1000ms delay)
+npm run migrate -- --delay=1000
+
+# Change batch summary frequency
+npm run migrate -- --batch-size=100
+```
+
+**Full documentation**: See [migrate/README.md](migrate/README.md) for complete migration guide.
+
+---
+
 ## Testing
 
 ### Local Development

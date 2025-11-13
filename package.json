@@ -7,7 +7,9 @@
     "sync": "node --experimental-modules api/sync.js",
     "archive": "node --experimental-modules api/archive.js",
     "test": "node --experimental-modules api/test.js",
-    "monitor": "node --experimental-modules api/monitor.js"
+    "monitor": "node --experimental-modules api/monitor.js",
+    "convert": "node --experimental-modules lib/converter.js",
+    "migrate": "node --experimental-modules api/migrate.js"
   },
   "dependencies": {
     "node-fetch": "^3.3.2",
