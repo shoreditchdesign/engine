@@ -55,7 +55,7 @@ export const REFERENCE_FIELDS = {
 export const SYNC_CONFIG = {
   DEFAULT_RECENT_COUNT: 20, // Default number of posts to sync
   BATCH_SIZE: 10,
-  MAX_RETRIES: 3,
+  MAX_RETRIES: 10, // Increased from 3 to 10 for persistent rate limit handling
   TIMEOUT: 30000,
   CACHE_TTL: 900000, // 15 minutes in milliseconds
 };

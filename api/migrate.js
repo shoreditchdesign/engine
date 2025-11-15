@@ -8,6 +8,7 @@ import {
   updateItem,
   publishItems,
   createWebflowClient,
+  preloadAllItems,
 } from "../lib/api/webflow.js";
 import ReferenceManager from "../lib/reference.js";
 import {
@@ -60,7 +61,7 @@ function delay(ms) {
  * @returns {Promise<object>} - Sync summary
  */
 export async function runMigration(options = {}) {
-  const { delayMs = 500, batchSize = 50 } = options;
+  const { delayMs = 1000, batchSize = 50 } = options;
 
   console.log(`\n${"=".repeat(60)}`);
   console.log(`Starting migration (migrate/export.json)...`);
@@ -83,7 +84,10 @@ export async function runMigration(options = {}) {
     const webflowClient = createWebflowClient();
     const refManager = new ReferenceManager(webflowClient);
 
-    // 1. Load migration articles from export.json
+    // 1. Preload all existing Webflow items into memory (one-time cost)
+    const existingItemsMap = await preloadAllItems();
+
+    // 2. Load migration articles from export.json
     const engineArticles = await loadMigrationArticles();
 
     if (!engineArticles || !Array.isArray(engineArticles)) {
@@ -112,8 +116,9 @@ export async function runMigration(options = {}) {
         // 2c. Ensure tags exist (batch operation)
         const tagIds = await refManager.ensureTagsExist(article.tags || []);
 
-        // 2d. Check if article exists in Webflow
-        const existingItem = await findItemByPostId(article.postId);
+        // 2d. Check if article exists in Webflow (using preloaded map - 0 API calls)
+        const existingItem =
+          existingItemsMap.get(String(article.postId)) || null;
 
         // 2e. Transform Engine data to Webflow format
         const webflowData = transformEngineToWebflow(article, {
