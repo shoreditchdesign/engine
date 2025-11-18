@@ -327,68 +327,24 @@ async function writeArchiveLog(context, archivedArticles, daysThreshold) {
 }
 
 /**
- * Azure Function handler
- * Supports both timer trigger (automated daily) and HTTP trigger (manual)
+ * Azure Function handler - Timer trigger only
+ * Runs automatically daily at 2 AM UTC
  */
-export default async function (context, req) {
-  // Determine trigger type
-  const isTimerTrigger = context.bindings.myTimer !== undefined;
-  const triggerType = isTimerTrigger ? "Timer" : "HTTP";
-
-  context.log(`Archive function triggered by ${triggerType}`);
+export default async function (context) {
+  context.log(`Archive function triggered by timer`);
 
   try {
-    // Allow custom days threshold from request body or query (for manual HTTP archives)
-    // Timer triggers will use default 60 days
-    const daysThreshold = isTimerTrigger
-      ? 60
-      : req.body?.daysThreshold ||
-        (req.query.daysThreshold ? parseInt(req.query.daysThreshold) : null) ||
-        60;
-
-    // Validate days threshold
-    if (
-      typeof daysThreshold !== "number" ||
-      daysThreshold < 1 ||
-      daysThreshold > 365
-    ) {
-      context.res = {
-        status: 400,
-        headers: { "Content-Type": "application/json" },
-        body: {
-          success: false,
-          error: "Invalid daysThreshold. Must be a number between 1 and 365.",
-        },
-      };
-      return;
-    }
+    // Use default 60 days for timer triggers
+    const daysThreshold = 60;
 
     // Run archive
     const summary = await runArchive(context, daysThreshold);
 
-    // Set HTTP response (for HTTP triggers)
-    context.res = {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-      body: {
-        success: true,
-        ...summary,
-        timestamp: new Date().toISOString(),
-        daysThreshold,
-        triggerType,
-      },
-    };
+    context.log(
+      `Archive completed: ${summary.archived.length} archived, ${summary.errors.length} errors`,
+    );
   } catch (error) {
     context.log.error(`Archive handler failed: ${error.message}`);
-    context.res = {
-      status: 500,
-      headers: { "Content-Type": "application/json" },
-      body: {
-        success: false,
-        error: error.message,
-        timestamp: new Date().toISOString(),
-        triggerType,
-      },
-    };
+    throw error;
   }
 }

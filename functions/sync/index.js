@@ -413,68 +413,24 @@ async function runSync(
 }
 
 /**
- * Azure Function handler
- * Supports both timer trigger (automated) and HTTP trigger (manual)
+ * Azure Function handler - Timer trigger only
+ * Runs automatically every 15 minutes
  */
-export default async function (context, req) {
-  // Determine trigger type
-  const isTimerTrigger = context.bindings.myTimer !== undefined;
-  const triggerType = isTimerTrigger ? "Timer" : "HTTP";
-
-  context.log(`Sync function triggered by ${triggerType}`);
+export default async function (context) {
+  context.log(`Sync function triggered by timer`);
 
   try {
-    // Allow custom recent count from request body or query (for manual HTTP syncs)
-    // Timer triggers will use default count
-    const recentCount = isTimerTrigger
-      ? SYNC_CONFIG.DEFAULT_RECENT_COUNT
-      : req.body?.recent ||
-        (req.query.recent ? parseInt(req.query.recent) : null) ||
-        SYNC_CONFIG.DEFAULT_RECENT_COUNT;
-
-    // Validate recent count
-    if (
-      typeof recentCount !== "number" ||
-      recentCount < 1 ||
-      recentCount > 1000
-    ) {
-      context.res = {
-        status: 400,
-        headers: { "Content-Type": "application/json" },
-        body: {
-          success: false,
-          error: "Invalid recent count. Must be a number between 1 and 1000.",
-        },
-      };
-      return;
-    }
+    // Use default count for timer triggers
+    const recentCount = SYNC_CONFIG.DEFAULT_RECENT_COUNT;
 
     // Run sync
     const summary = await runSync(context, recentCount);
 
-    // Set HTTP response (for HTTP triggers)
-    context.res = {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-      body: {
-        success: true,
-        ...summary,
-        timestamp: new Date().toISOString(),
-        recentCount,
-        triggerType,
-      },
-    };
+    context.log(
+      `Sync completed: ${summary.created.length} created, ${summary.updated.length} updated, ${summary.skipped.length} skipped`,
+    );
   } catch (error) {
     context.log.error(`Sync handler failed: ${error.message}`);
-    context.res = {
-      status: 500,
-      headers: { "Content-Type": "application/json" },
-      body: {
-        success: false,
-        error: error.message,
-        timestamp: new Date().toISOString(),
-        triggerType,
-      },
-    };
+    throw error;
   }
 }
