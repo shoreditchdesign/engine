@@ -2,7 +2,12 @@ import "dotenv/config";
 import { promises as fs } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
-import { listItems, deleteItem, preloadAllItems } from "../lib/api/webflow.js";
+import {
+  listItems,
+  deleteItem,
+  preloadAllItems,
+  publishSite,
+} from "../lib/api/webflow.js";
 import { WEBFLOW_COLLECTIONS, FIELD_MAPPING } from "../config/constants.js";
 import { logWithTimestamp, categorizeError, delay } from "../lib/utils.js";
 
@@ -224,6 +229,16 @@ export async function runArchive(daysThreshold = 60) {
     // Write deleted articles to log file
     if (summary.deleted.length > 0) {
       await writeDeleteLog(summary.deleted, daysThreshold);
+    }
+
+    // Publish site to trigger search engine re-crawl
+    if (summary.deleted.length > 0) {
+      logWithTimestamp(
+        "Publishing site to trigger search engine re-crawl...",
+        "info",
+      );
+      await publishSite(process.env.WEBFLOW_SITE_ID);
+      logWithTimestamp("Site published successfully", "info");
     }
 
     // Final summary
