@@ -1,0 +1,55 @@
+name: Sync Engine to Webflow
+
+on:
+  # Scheduled to run every 15 minutes
+  schedule:
+    - cron: "*/15 * * * *"
+
+  # Allow manual trigger with custom parameters
+  workflow_dispatch:
+    inputs:
+      recent_count:
+        description: "Number of recent articles to sync"
+        required: false
+        default: "200"
+        type: string
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20.x"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run sync
+        env:
+          NODE_ENV: production
+          WEBFLOW_API_TOKEN: ${{ secrets.WEBFLOW_API_TOKEN }}
+          WEBFLOW_SITE_ID: ${{ secrets.WEBFLOW_SITE_ID }}
+          WEBFLOW_NEWS_COLLECTION_ID: ${{ secrets.WEBFLOW_NEWS_COLLECTION_ID }}
+          WEBFLOW_NEWS_CATEGORY_COLLECTION_ID: ${{ secrets.WEBFLOW_NEWS_CATEGORY_COLLECTION_ID }}
+          WEBFLOW_NEWS_TAG_COLLECTION_ID: ${{ secrets.WEBFLOW_NEWS_TAG_COLLECTION_ID }}
+        run: |
+          if [ -n "${{ inputs.recent_count }}" ]; then
+            npm run sync ${{ inputs.recent_count }}
+          else
+            npm run sync
+          fi
+
+      - name: Upload sync logs (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sync-logs-${{ github.run_number }}
+          path: logs/
+          retention-days: 7
