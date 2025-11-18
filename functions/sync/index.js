@@ -1,29 +1,36 @@
-import "dotenv/config";
-import { getRecentPosts, getPostById } from "../lib/api/engine.js";
-import {
+require("dotenv").config();
+const { getRecentPosts, getPostById } = require("../../lib/api/engine.js");
+const {
   findItemByPostId,
   preloadAllItems,
   createItem,
   updateItem,
   publishItems,
   createWebflowClient,
-} from "../lib/api/webflow.js";
-import ReferenceManager from "../lib/reference.js";
-import {
+} = require("../../lib/api/webflow.js");
+const ReferenceManager = require("../../lib/reference.js");
+const {
   transformEngineToWebflow,
   needsUpdate,
   validateArticle,
-} from "../lib/transformer.js";
-import { WEBFLOW_COLLECTIONS, SYNC_CONFIG } from "../config/constants.js";
-import { logWithTimestamp, categorizeError } from "../lib/utils.js";
+} = require("../../lib/transformer.js");
+const {
+  WEBFLOW_COLLECTIONS,
+  SYNC_CONFIG,
+} = require("../../config/constants.js");
+const { logWithTimestamp, categorizeError } = require("../../lib/utils.js");
 
 /**
  * Core sync logic - reusable by cron and manual triggers
- * @param {number} recentCount - Number of recent posts to sync (default: 20)
+ * @param {object} context - Azure Function context for logging
+ * @param {number} recentCount - Number of recent posts to sync (default: 200)
  * @returns {Promise<object>} - Sync summary
  */
-export async function runSync(recentCount = SYNC_CONFIG.DEFAULT_RECENT_COUNT) {
-  console.log(`\nStarting sync (${recentCount} recent posts)...\n`);
+async function runSync(
+  context,
+  recentCount = SYNC_CONFIG.DEFAULT_RECENT_COUNT,
+) {
+  context.log(`\nStarting sync (${recentCount} recent posts)...\n`);
 
   const summary = {
     created: [],
@@ -55,7 +62,7 @@ export async function runSync(recentCount = SYNC_CONFIG.DEFAULT_RECENT_COUNT) {
     }
 
     const totalArticles = engineArticles.length;
-    console.log(`Loaded ${totalArticles} articles to sync\n`);
+    context.log(`Loaded ${totalArticles} articles to sync\n`);
 
     // 3. Process each article
     for (let i = 0; i < engineArticles.length; i++) {
@@ -74,8 +81,7 @@ export async function runSync(recentCount = SYNC_CONFIG.DEFAULT_RECENT_COUNT) {
         if (existingItem && !needsUpdate(existingItem, article)) {
           // No update needed - skip without any API calls
           summary.skipped.push(article.postId);
-
-          console.log(
+          context.log(
             `○ [${articleNum}/${totalArticles}] SKIPPED: "${article.title}" (ID: ${article.postId}) - no changes`,
           );
           continue; // Move to next article
@@ -121,9 +127,25 @@ export async function runSync(recentCount = SYNC_CONFIG.DEFAULT_RECENT_COUNT) {
             await publishItems(WEBFLOW_COLLECTIONS.NEWS, [createdItem.id]);
             summary.created.push(completeArticle.postId);
 
-            console.log(
+            context.log(
               `✓ [${articleNum}/${totalArticles}] CREATED: "${completeArticle.title}" (ID: ${completeArticle.postId})`,
             );
+
+            // Log individual create event to Application Insights
+            if (context.log) {
+              context.log({
+                eventName: "ArticleCreated",
+                properties: {
+                  postId: completeArticle.postId,
+                  title: completeArticle.title,
+                  slug: completeArticle.slug,
+                  category: completeArticle.cat,
+                  tags: completeArticle.tags || [],
+                  isFeatured: completeArticle.isFeatured || false,
+                  isRecurring: completeArticle.isRecurring || false,
+                },
+              });
+            }
           } catch (createError) {
             const errorInfo = categorizeError(createError);
 
@@ -134,9 +156,8 @@ export async function runSync(recentCount = SYNC_CONFIG.DEFAULT_RECENT_COUNT) {
                 "Unique value is already in database",
               )
             ) {
-              logWithTimestamp(
-                `[${articleNum}/${totalArticles}] Slug conflict for "${completeArticle.title}", auto-resolving...`,
-                "warn",
+              context.log.warn(
+                `Slug conflict for article ${completeArticle.postId}, auto-resolving...`,
               );
 
               const webflowDataWithHash = transformEngineToWebflow(
@@ -154,15 +175,31 @@ export async function runSync(recentCount = SYNC_CONFIG.DEFAULT_RECENT_COUNT) {
               await publishItems(WEBFLOW_COLLECTIONS.NEWS, [createdItem.id]);
               summary.created.push(completeArticle.postId);
 
-              console.log(
-                `[${articleNum}/${totalArticles}] CREATED (with hash): "${completeArticle.title}" (ID: ${completeArticle.postId})`,
+              context.log(
+                `[${articleNum}/${totalArticles}] CREATED (hashed slug): "${completeArticle.title}" (ID: ${completeArticle.postId})`,
               );
+
+              // Log individual create event to Application Insights
+              if (context.log) {
+                context.log({
+                  eventName: "ArticleCreated",
+                  properties: {
+                    postId: completeArticle.postId,
+                    title: completeArticle.title,
+                    slug: webflowDataWithHash.fieldData.slug,
+                    category: completeArticle.cat,
+                    tags: completeArticle.tags || [],
+                    isFeatured: completeArticle.isFeatured || false,
+                    isRecurring: completeArticle.isRecurring || false,
+                    slugConflict: true,
+                  },
+                });
+              }
             }
             // Handle image import errors - retry without images
             else if (errorInfo.isImageError) {
-              logWithTimestamp(
-                `[${articleNum}/${totalArticles}] Image import failed for "${completeArticle.title}", retrying without images...`,
-                "warn",
+              context.log.warn(
+                `Image import failed for article ${completeArticle.postId}, retrying without images...`,
               );
 
               const webflowDataWithoutImages = transformEngineToWebflow(
@@ -187,9 +224,26 @@ export async function runSync(recentCount = SYNC_CONFIG.DEFAULT_RECENT_COUNT) {
                 warning: "Article created without images due to import error",
               });
 
-              console.log(
+              context.log(
                 `[${articleNum}/${totalArticles}] CREATED (no images): "${completeArticle.title}" (ID: ${completeArticle.postId})`,
               );
+
+              // Log individual create event to Application Insights
+              if (context.log) {
+                context.log({
+                  eventName: "ArticleCreated",
+                  properties: {
+                    postId: completeArticle.postId,
+                    title: completeArticle.title,
+                    slug: completeArticle.slug,
+                    category: completeArticle.cat,
+                    tags: completeArticle.tags || [],
+                    isFeatured: completeArticle.isFeatured || false,
+                    isRecurring: completeArticle.isRecurring || false,
+                    imageImportFailed: true,
+                  },
+                });
+              }
             } else {
               throw createError; // Re-throw if it's not a handled error
             }
@@ -215,17 +269,32 @@ export async function runSync(recentCount = SYNC_CONFIG.DEFAULT_RECENT_COUNT) {
             await publishItems(WEBFLOW_COLLECTIONS.NEWS, [updatedItem.id]);
             summary.updated.push(completeArticle.postId);
 
-            console.log(
+            context.log(
               `↻ [${articleNum}/${totalArticles}] UPDATED: "${completeArticle.title}" (ID: ${completeArticle.postId})`,
             );
+
+            // Log individual update event to Application Insights
+            if (context.log) {
+              context.log({
+                eventName: "ArticleUpdated",
+                properties: {
+                  postId: completeArticle.postId,
+                  title: completeArticle.title,
+                  slug: completeArticle.slug,
+                  category: completeArticle.cat,
+                  tags: completeArticle.tags || [],
+                  isFeatured: completeArticle.isFeatured || false,
+                  isRecurring: completeArticle.isRecurring || false,
+                },
+              });
+            }
           } catch (updateError) {
             const errorInfo = categorizeError(updateError);
 
             // Handle image import errors on updates - retry without images
             if (errorInfo.isImageError) {
-              logWithTimestamp(
-                `[${articleNum}/${totalArticles}] Image import failed for "${completeArticle.title}", retrying update without images...`,
-                "warn",
+              context.log.warn(
+                `Image import failed for article ${completeArticle.postId}, retrying update without images...`,
               );
 
               const updateDataWithoutImages = transformEngineToWebflow(
@@ -250,22 +319,30 @@ export async function runSync(recentCount = SYNC_CONFIG.DEFAULT_RECENT_COUNT) {
                 warning: "Article updated without images due to import error",
               });
 
-              console.log(
+              context.log(
                 `[${articleNum}/${totalArticles}] UPDATED (no images): "${completeArticle.title}" (ID: ${completeArticle.postId})`,
               );
+
+              // Log individual update event to Application Insights
+              if (context.log) {
+                context.log({
+                  eventName: "ArticleUpdated",
+                  properties: {
+                    postId: completeArticle.postId,
+                    title: completeArticle.title,
+                    slug: completeArticle.slug,
+                    category: completeArticle.cat,
+                    tags: completeArticle.tags || [],
+                    isFeatured: completeArticle.isFeatured || false,
+                    isRecurring: completeArticle.isRecurring || false,
+                    imageImportFailed: true,
+                  },
+                });
+              }
             } else {
               throw updateError; // Re-throw if it's not an image error
             }
           }
-        }
-
-        // Log batch summary every 50 articles
-        if (processedCount % 50 === 0) {
-          const elapsedSec = ((Date.now() - startTime) / 1000).toFixed(1);
-          const rate = (processedCount / elapsedSec).toFixed(2);
-          console.log(
-            `\nProgress: ${processedCount}/${totalArticles} | Rate: ${rate} articles/sec | Elapsed: ${elapsedSec}s\n`,
-          );
         }
       } catch (error) {
         summary.errors.push(article.postId);
@@ -274,14 +351,22 @@ export async function runSync(recentCount = SYNC_CONFIG.DEFAULT_RECENT_COUNT) {
           title: article.title,
           error: error.message,
         });
-
-        console.log(
+        context.log.error(
           `✗ [${articleNum}/${totalArticles}] ERROR: "${article.title}" (ID: ${article.postId}) - ${error.message}`,
+        );
+      }
+
+      // Log batch summary every 50 articles
+      if (processedCount % 50 === 0) {
+        const elapsedSec = ((Date.now() - startTime) / 1000).toFixed(1);
+        const rate = (processedCount / elapsedSec).toFixed(2);
+        context.log(
+          `\nProgress: ${processedCount}/${totalArticles} | Rate: ${rate} articles/sec | Elapsed: ${elapsedSec}s\n`,
         );
       }
     }
   } catch (error) {
-    logWithTimestamp(`Sync failed: ${error.message}`, "error");
+    context.log.error(`Sync failed: ${error.message}`);
     summary.errorDetails.push({ generalError: error.message });
     throw error;
   }
@@ -291,91 +376,108 @@ export async function runSync(recentCount = SYNC_CONFIG.DEFAULT_RECENT_COUNT) {
   const avgRate =
     processedCount > 0 ? (processedCount / totalTime).toFixed(2) : "0.00";
 
-  console.log(`\nSYNC COMPLETE`);
-  console.log(
-    `Total: ${processedCount.toString().padEnd(4)} | Created: ${summary.created.length.toString().padEnd(4)} | Updated: ${summary.updated.length.toString().padEnd(4)} | Skipped: ${summary.skipped.length.toString().padEnd(4)} | Warnings: ${summary.warnings.length.toString().padEnd(4)} | Errors: ${summary.errors.length.toString().padEnd(4)} | Time: ${totalTime.padEnd(6)}s | Rate: ${avgRate.padEnd(5)}/s`,
+  // Log metrics to Application Insights
+  if (context.log && context.log.metric) {
+    context.log.metric("SyncTotalArticles", totalArticles);
+    context.log.metric("SyncCreatedCount", summary.created.length);
+    context.log.metric("SyncUpdatedCount", summary.updated.length);
+    context.log.metric("SyncSkippedCount", summary.skipped.length);
+    context.log.metric("SyncWarningCount", summary.warnings.length);
+    context.log.metric("SyncErrorCount", summary.errors.length);
+    context.log.metric("SyncDurationSeconds", parseFloat(totalTime));
+    context.log.metric("SyncArticlesPerSecond", parseFloat(avgRate));
+  }
+
+  context.log(`\nSYNC COMPLETE`);
+  context.log(
+    `Total: ${totalArticles.toString().padEnd(4)} | Created: ${summary.created.length.toString().padEnd(4)} | Updated: ${summary.updated.length.toString().padEnd(4)} | Skipped: ${summary.skipped.length.toString().padEnd(4)} | Warnings: ${summary.warnings.length.toString().padEnd(4)} | Errors: ${summary.errors.length.toString().padEnd(4)} | Time: ${totalTime.padEnd(6)}s | Rate: ${avgRate.padEnd(5)}/s`,
   );
-  console.log();
+  context.log();
 
   // Log warnings if any
   if (summary.warnings.length > 0) {
-    console.log(`Warnings (${summary.warnings.length}):`);
+    context.log(`Warnings (${summary.warnings.length}):`);
     summary.warnings.forEach((warn, idx) => {
-      console.log(
-        `  ${idx + 1}. ${warn.postId} - ${warn.title}: ${warn.warning}`,
-      );
+      context.log(`  ${idx + 1}. ${warn.postId}: ${warn.warning}`);
     });
-    console.log();
+    context.log();
   }
 
   // Log errors if any
   if (summary.errors.length > 0) {
-    console.log(`Failed articles (${summary.errors.length}):`);
+    context.log(`Failed articles (${summary.errors.length}):`);
     summary.errorDetails.forEach((err, idx) => {
-      console.log(`  ${idx + 1}. ${err.postId} - ${err.title}: ${err.error}`);
+      context.log(`  ${idx + 1}. ${err.postId}: ${err.error}`);
     });
-    console.log();
+    context.log();
   }
 
   return summary;
 }
 
 /**
- * Vercel serverless function handler
- * @param {object} req - Request object
- * @param {object} res - Response object
+ * Azure Function handler
+ * Supports both timer trigger (automated) and HTTP trigger (manual)
  */
-export default async function handler(req, res) {
+module.exports = async function (context, req) {
+  // Determine trigger type
+  const isTimerTrigger = context.bindings.myTimer !== undefined;
+  const triggerType = isTimerTrigger ? "Timer" : "HTTP";
+
+  context.log(`Sync function triggered by ${triggerType}`);
+
   try {
-    // Allow custom recent count from request body (for manual syncs)
-    const recentCount = req.body?.recent || SYNC_CONFIG.DEFAULT_RECENT_COUNT;
+    // Allow custom recent count from request body or query (for manual HTTP syncs)
+    // Timer triggers will use default count
+    const recentCount = isTimerTrigger
+      ? SYNC_CONFIG.DEFAULT_RECENT_COUNT
+      : req.body?.recent ||
+        (req.query.recent ? parseInt(req.query.recent) : null) ||
+        SYNC_CONFIG.DEFAULT_RECENT_COUNT;
 
     // Validate recent count
     if (
       typeof recentCount !== "number" ||
       recentCount < 1 ||
-      recentCount > 100
+      recentCount > 1000
     ) {
-      return res.status(400).json({
-        success: false,
-        error: "Invalid recent count. Must be a number between 1 and 100.",
-      });
+      context.res = {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+        body: {
+          success: false,
+          error: "Invalid recent count. Must be a number between 1 and 1000.",
+        },
+      };
+      return;
     }
 
     // Run sync
-    const summary = await runSync(recentCount);
+    const summary = await runSync(context, recentCount);
 
-    return res.status(200).json({
-      success: true,
-      ...summary,
-      timestamp: new Date().toISOString(),
-      recentCount,
-    });
+    // Set HTTP response (for HTTP triggers)
+    context.res = {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+      body: {
+        success: true,
+        ...summary,
+        timestamp: new Date().toISOString(),
+        recentCount,
+        triggerType,
+      },
+    };
   } catch (error) {
-    logWithTimestamp(`Sync handler failed: ${error.message}`, "error");
-    return res.status(500).json({
-      success: false,
-      error: error.message,
-      timestamp: new Date().toISOString(),
-    });
+    context.log.error(`Sync handler failed: ${error.message}`);
+    context.res = {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+      body: {
+        success: false,
+        error: error.message,
+        timestamp: new Date().toISOString(),
+        triggerType,
+      },
+    };
   }
-}
-
-/**
- * CLI execution handler
- * Run with: npm run sync [count]
- * Example: npm run sync 50
- */
-if (import.meta.url === `file://${process.argv[1]}`) {
-  const recentCount =
-    parseInt(process.argv[2]) || SYNC_CONFIG.DEFAULT_RECENT_COUNT;
-
-  runSync(recentCount)
-    .then((summary) => {
-      process.exit(summary.errors.length > 0 ? 1 : 0);
-    })
-    .catch((error) => {
-      console.error(`Fatal error: ${error.message}`);
-      process.exit(1);
-    });
-}
+};

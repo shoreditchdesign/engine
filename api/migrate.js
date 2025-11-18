@@ -56,17 +56,20 @@ function delay(ms) {
  * Migration sync logic - uses migrate/export.json for large-scale migrations
  * Includes real-time CLI progress logging for each article
  * @param {object} options - Migration options
- * @param {number} options.delayMs - Delay between articles in milliseconds (default: 500)
+ * @param {number} options.delayMs - Delay between articles in milliseconds (default: 1000)
  * @param {number} options.batchSize - Number of articles to process before logging summary (default: 50)
+ * @param {boolean} options.createOnly - If true, skip all existing articles without updating (default: false)
  * @returns {Promise<object>} - Sync summary
  */
 export async function runMigration(options = {}) {
-  const { delayMs = 1000, batchSize = 50 } = options;
+  const { delayMs = 1000, batchSize = 50, createOnly = false } = options;
 
-  console.log(`\n${"=".repeat(60)}`);
-  console.log(`Starting migration (migrate/export.json)...`);
+  console.log(`\nStarting migration (migrate/export.json)...`);
   console.log(`Delay between articles: ${delayMs}ms`);
-  console.log(`${"=".repeat(60)}\n`);
+  console.log(
+    `Mode: ${createOnly ? "CREATE ONLY (skip existing)" : "CREATE + UPDATE"}`,
+  );
+  console.log();
 
   const summary = {
     created: [],
@@ -95,7 +98,7 @@ export async function runMigration(options = {}) {
     }
 
     const totalArticles = engineArticles.length;
-    console.log(`📦 Loaded ${totalArticles} articles to migrate\n`);
+    console.log(`Loaded ${totalArticles} articles to migrate\n`);
 
     // 2. Process each article
     for (let i = 0; i < engineArticles.length; i++) {
@@ -107,26 +110,43 @@ export async function runMigration(options = {}) {
         // 2a. Validate article data
         validateArticle(article);
 
-        // 2b. Ensure category exists (creates if needed)
+        // 2b. Check if article exists in Webflow (using preloaded map - 0 API calls)
+        const existingItem =
+          existingItemsMap.get(String(article.postId)) || null;
+
+        // 2c. Check if update is needed (skip early in create-only mode or if no changes)
+        if (createOnly && existingItem) {
+          // Create-only mode: skip all existing articles
+          summary.skipped.push(article.postId);
+          console.log(
+            `○ [${articleNum}/${totalArticles}] SKIPPED: "${article.title}" (ID: ${article.postId}) - already exists`,
+          );
+          continue;
+        } else if (existingItem && !needsUpdate(existingItem, article)) {
+          // No update needed
+          summary.skipped.push(article.postId);
+          console.log(
+            `○ [${articleNum}/${totalArticles}] SKIPPED: "${article.title}" (ID: ${article.postId}) - no changes`,
+          );
+          continue;
+        }
+
+        // 2d. Article needs creation or update - ensure category and tags exist
         const categoryId = await refManager.ensureCategoryExists(
           article.cat,
           article.color,
         );
 
-        // 2c. Ensure tags exist (batch operation)
+        // 2e. Ensure tags exist (batch operation)
         const tagIds = await refManager.ensureTagsExist(article.tags || []);
 
-        // 2d. Check if article exists in Webflow (using preloaded map - 0 API calls)
-        const existingItem =
-          existingItemsMap.get(String(article.postId)) || null;
-
-        // 2e. Transform Engine data to Webflow format
+        // 2f. Transform Engine data to Webflow format
         const webflowData = transformEngineToWebflow(article, {
           categoryId,
           tagIds,
         });
 
-        // 2f. Create or update
+        // 2g. Create or update
         if (!existingItem) {
           // Create new article
           try {
@@ -154,7 +174,7 @@ export async function runMigration(options = {}) {
             ) {
               // Retry with hashed slug
               logWithTimestamp(
-                `⚠ [${articleNum}/${totalArticles}] Slug conflict for "${article.title}", auto-resolving...`,
+                `[${articleNum}/${totalArticles}] Slug conflict for "${article.title}", auto-resolving...`,
                 "warn",
               );
 
@@ -177,13 +197,13 @@ export async function runMigration(options = {}) {
               summary.created.push(article.postId);
 
               console.log(
-                `✓ [${articleNum}/${totalArticles}] CREATED (with hash): "${article.title}" (ID: ${article.postId})`,
+                `[${articleNum}/${totalArticles}] CREATED (with hash): "${article.title}" (ID: ${article.postId})`,
               );
             } else {
               throw createError; // Re-throw if it's not a slug conflict
             }
           }
-        } else if (needsUpdate(existingItem, article)) {
+        } else {
           // Update existing article
           const updateData = transformEngineToWebflow(
             article,
@@ -205,12 +225,6 @@ export async function runMigration(options = {}) {
           console.log(
             `↻ [${articleNum}/${totalArticles}] UPDATED: "${article.title}" (ID: ${article.postId})`,
           );
-        } else {
-          // No update needed
-          summary.skipped.push(article.postId);
-          console.log(
-            `○ [${articleNum}/${totalArticles}] SKIPPED: "${article.title}" (ID: ${article.postId}) - no changes`,
-          );
         }
 
         // Log batch summary
@@ -218,7 +232,7 @@ export async function runMigration(options = {}) {
           const elapsedSec = ((Date.now() - startTime) / 1000).toFixed(1);
           const rate = (processedCount / elapsedSec).toFixed(2);
           console.log(
-            `\n📊 Progress: ${processedCount}/${totalArticles} | Rate: ${rate} articles/sec | Elapsed: ${elapsedSec}s\n`,
+            `\nProgress: ${processedCount}/${totalArticles} | Rate: ${rate} articles/sec | Elapsed: ${elapsedSec}s\n`,
           );
         }
 
@@ -239,7 +253,7 @@ export async function runMigration(options = {}) {
       }
     }
   } catch (error) {
-    logWithTimestamp(`✗ Migration failed: ${error.message}`, "error");
+    logWithTimestamp(`Migration failed: ${error.message}`, "error");
     summary.errorDetails.push({ generalError: error.message });
     throw error;
   }
@@ -248,20 +262,14 @@ export async function runMigration(options = {}) {
   const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
   const avgRate = (processedCount / totalTime).toFixed(2);
 
-  console.log(`\n${"=".repeat(60)}`);
-  console.log(`MIGRATION COMPLETE`);
-  console.log(`${"=".repeat(60)}`);
-  console.log(`Total processed: ${processedCount}`);
-  console.log(`Created: ${summary.created.length}`);
-  console.log(`Updated: ${summary.updated.length}`);
-  console.log(`Skipped: ${summary.skipped.length}`);
-  console.log(`Errors: ${summary.errors.length}`);
-  console.log(`Total time: ${totalTime}s`);
-  console.log(`Average rate: ${avgRate} articles/sec`);
-  console.log(`${"=".repeat(60)}\n`);
+  console.log(`\nMIGRATION COMPLETE`);
+  console.log(
+    `Total: ${processedCount.toString().padEnd(4)} | Created: ${summary.created.length.toString().padEnd(4)} | Updated: ${summary.updated.length.toString().padEnd(4)} | Skipped: ${summary.skipped.length.toString().padEnd(4)} | Errors: ${summary.errors.length.toString().padEnd(4)} | Time: ${totalTime.padEnd(6)}s | Rate: ${avgRate.padEnd(5)}/s`,
+  );
+  console.log();
 
   if (summary.errors.length > 0) {
-    console.log(`\n⚠ Failed articles (${summary.errors.length}):`);
+    console.log(`Failed articles (${summary.errors.length}):`);
     summary.errorDetails.forEach((err, idx) => {
       console.log(`  ${idx + 1}. ${err.postId} - ${err.title}: ${err.error}`);
     });
@@ -305,18 +313,24 @@ export default async function handler(req, res) {
 /**
  * CLI execution handler
  * Run with: npm run migrate
+ * Options:
+ *   --delay=1000          Delay between articles in ms
+ *   --batch-size=50       Number of articles before logging summary
+ *   --create-only         Skip all existing articles without updating
  */
 if (import.meta.url === `file://${process.argv[1]}`) {
   // Parse CLI arguments
   const args = process.argv.slice(2);
   const options = {};
 
-  // Parse --delay=500 and --batch-size=50
+  // Parse --delay=500, --batch-size=50, --create-only
   args.forEach((arg) => {
     if (arg.startsWith("--delay=")) {
       options.delayMs = parseInt(arg.split("=")[1]);
     } else if (arg.startsWith("--batch-size=")) {
       options.batchSize = parseInt(arg.split("=")[1]);
+    } else if (arg === "--create-only") {
+      options.createOnly = true;
     }
   });
 
@@ -325,7 +339,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       process.exit(summary.errors.length > 0 ? 1 : 0);
     })
     .catch((error) => {
-      console.error(`✗ Fatal error: ${error.message}`);
+      console.error(`Fatal error: ${error.message}`);
       process.exit(1);
     });
 }

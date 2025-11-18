@@ -1,12 +1,13 @@
 {
   "name": "engine-webflow-sync",
-  "version": "1.0.0",
-  "main": "index.js",
-  "type": "module",
+  "version": "2.0.0",
+  "description": "Azure Functions for Engine-to-Webflow sync with automated cron jobs",
+  "main": "functions/sync/index.js",
   "scripts": {
+    "start": "func start",
+    "test:local": "func start --port 7071",
     "sync": "node --experimental-modules api/sync.js",
     "archive": "node --experimental-modules api/archive.js",
-    "test": "node --experimental-modules api/test.js",
     "monitor": "node --experimental-modules api/monitor.js",
     "convert": "node --experimental-modules lib/converter.js",
     "migrate": "node --experimental-modules api/migrate.js"
@@ -16,7 +17,10 @@
     "dotenv": "^16.3.1",
     "abort-controller": "^3.0.0"
   },
+  "devDependencies": {
+    "azure-functions-core-tools": "^4.0.5095"
+  },
   "engines": {
-    "node": "18.x"
+    "node": "20.x"
   }
 }

@@ -108,3 +108,22 @@ typings/
 # Migration data
 migrate/export.csv
 migrate/export.json
+
+# Azure Functions
+local.settings.json
+bin/
+obj/
+.azure/
+
+# Local test files
+local/*.log
+
+# Archive logs
+logs/*.log
+
+# Migration docs
+checklist.md
+summary.md
+
+# Webflow API docs
+docs/data.md

@@ -64,32 +64,32 @@ if (import.meta.url === `file://${process.argv[1]}`) {
     try {
       await getRecentPosts(1);
       healthStatus.engine_api = "healthy";
-      console.log("✓ Engine API: healthy");
+      console.log("Engine API: healthy");
     } catch (error) {
       healthStatus.engine_api = "unhealthy";
-      console.log(`✗ Engine API: unhealthy - ${error.message}`);
+      console.log(`Engine API: unhealthy - ${error.message}`);
     }
 
     // Test Webflow API
     try {
       await listItems(WEBFLOW_COLLECTIONS.NEWS, { offset: 0, limit: 1 });
       healthStatus.webflow_api = "healthy";
-      console.log("✓ Webflow API: healthy");
+      console.log("Webflow API: healthy");
     } catch (error) {
       healthStatus.webflow_api = "unhealthy";
-      console.log(`✗ Webflow API: unhealthy - ${error.message}`);
+      console.log(`Webflow API: unhealthy - ${error.message}`);
     }
 
     const overallStatus =
       healthStatus.engine_api === "healthy" &&
       healthStatus.webflow_api === "healthy";
 
-    console.log(`\n${overallStatus ? "✓" : "✗"} Overall status: ${overallStatus ? "healthy" : "unhealthy"}`);
+    console.log(`\nOverall status: ${overallStatus ? "healthy" : "unhealthy"}`);
     console.log(`Timestamp: ${healthStatus.timestamp}`);
 
     process.exit(overallStatus ? 0 : 1);
   })().catch((error) => {
-    console.error(`✗ Fatal error: ${error.message}`);
+    console.error(`Fatal error: ${error.message}`);
     process.exit(1);
   });
 }

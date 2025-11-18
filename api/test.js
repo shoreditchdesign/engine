@@ -117,7 +117,7 @@ export async function runTestSync() {
             ) {
               // Retry with hashed slug
               logWithTimestamp(
-                `⚠ Slug conflict for article ${article.postId}, auto-resolving...`,
+                `Slug conflict for article ${article.postId}, auto-resolving...`,
                 "warn",
               );
 
@@ -174,13 +174,13 @@ export async function runTestSync() {
           error: error.message,
         });
         logWithTimestamp(
-          `✗ Error syncing article ${article.postId}: ${error.message}`,
+          `Error syncing article ${article.postId}: ${error.message}`,
           "error",
         );
       }
     }
   } catch (error) {
-    logWithTimestamp(`✗ Test sync failed: ${error.message}`, "error");
+    logWithTimestamp(`Test sync failed: ${error.message}`, "error");
     summary.errorDetails.push({ generalError: error.message });
     throw error;
   }
@@ -188,11 +188,11 @@ export async function runTestSync() {
   // 4. Final summary
   if (summary.errors.length === 0) {
     console.log(
-      `✓ Test complete: Created ${summary.created.length} | Updated ${summary.updated.length} | Skipped ${summary.skipped.length} | Errors 0`,
+      `Test complete: Created ${summary.created.length} | Updated ${summary.updated.length} | Skipped ${summary.skipped.length} | Errors 0`,
     );
   } else {
     console.log(
-      `✓ Test complete: Created ${summary.created.length} | Updated ${summary.updated.length} | Skipped ${summary.skipped.length} | Errors ${summary.errors.length}`,
+      `Test complete: Created ${summary.created.length} | Updated ${summary.updated.length} | Skipped ${summary.skipped.length} | Errors ${summary.errors.length}`,
     );
     console.log(`\nFailed articles:`);
     summary.errorDetails.forEach((err) => {
@@ -240,7 +240,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       process.exit(summary.errors.length > 0 ? 1 : 0);
     })
     .catch((error) => {
-      console.error(`✗ Fatal error: ${error.message}`);
+      console.error(`Fatal error: ${error.message}`);
       process.exit(1);
     });
 }

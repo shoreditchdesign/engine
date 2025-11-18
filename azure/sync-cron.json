@@ -1,0 +1,46 @@
+{
+  "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "functionAppName": {
+      "type": "string",
+      "defaultValue": "engine-webflow-sync",
+      "metadata": {
+        "description": "Name of your Azure Function App"
+      }
+    },
+    "functionKey": {
+      "type": "securestring",
+      "metadata": {
+        "description": "Function key for authentication (get from Azure Portal > Function App > Functions > sync > Function Keys)"
+      }
+    }
+  },
+  "triggers": {
+    "Recurrence": {
+      "type": "Recurrence",
+      "recurrence": {
+        "frequency": "Minute",
+        "interval": 15,
+        "timeZone": "UTC"
+      }
+    }
+  },
+  "actions": {
+    "HTTP_Sync": {
+      "type": "Http",
+      "inputs": {
+        "method": "POST",
+        "uri": "https://@{parameters('functionAppName')}.azurewebsites.net/api/sync?code=@{parameters('functionKey')}",
+        "headers": {
+          "Content-Type": "application/json"
+        },
+        "body": {
+          "recent": 20
+        }
+      },
+      "runAfter": {}
+    }
+  },
+  "outputs": {}
+}

@@ -16,27 +16,34 @@ export const WEBFLOW_COLLECTIONS = {
 };
 
 // Webflow CMS Field Mapping (Engine API fields → Webflow CMS field names)
+// Each field maps to: { webflowField: string, required: boolean }
 export const FIELD_MAPPING = {
   // Article fields
-  postId: "postid",
-  title: "name", // Webflow uses 'name' for the title field
-  slug: "slug",
-  content: "content",
-  desc: "desc", // Rich text field for standfirst HTML content
-  timestamp: "published",
-  updatedDate: "last-updated", // NEW: for smart sync
-  cat: "category", // Multi-reference (will be converted to ID)
-  tags: "tags", // Multi-reference (will be converted to array of IDs)
-  color: "category-color",
-  isFeatured: "featured",
-  isRecurring: "recurring", // NEW
-  featuredImageBig: "featured-img-big", // Image field (updated from Link field)
-  featuredImageSmall: "featured-img-small", // Image field (updated from Link field)
+  postId: { webflowField: "postid", required: true },
+  title: { webflowField: "name", required: true },
+  slug: { webflowField: "slug", required: true },
+  content: { webflowField: "content", required: false },
+  desc: { webflowField: "desc", required: false }, // Optional - some articles don't have standfirst
+  timestamp: { webflowField: "published", required: true },
+  updatedDate: { webflowField: "last-updated", required: false }, // Optional - not set if never edited
+  cat: { webflowField: "category", required: true },
+  tags: { webflowField: "tags", required: false },
+  color: { webflowField: "category-color", required: false },
+  isFeatured: { webflowField: "featured", required: false },
+  isRecurring: { webflowField: "recurring", required: false },
+  featuredImageBig: { webflowField: "featured-img-big", required: false },
+  featuredImageSmall: { webflowField: "featured-img-small", required: false },
 
   // Sync metadata fields
-  lastSynced: "last-synced",
-  syncStatus: "sync-status",
+  lastSynced: { webflowField: "last-synced", required: true },
+  syncStatus: { webflowField: "sync-status", required: true },
 };
+
+// Helper function to get Webflow field name (backward compatibility)
+export function getWebflowFieldName(engineField) {
+  const mapping = FIELD_MAPPING[engineField];
+  return typeof mapping === "string" ? mapping : mapping?.webflowField;
+}
 
 // Reference Collection Field Names
 export const REFERENCE_FIELDS = {
@@ -53,9 +60,10 @@ export const REFERENCE_FIELDS = {
 
 // Sync Configuration
 export const SYNC_CONFIG = {
-  DEFAULT_RECENT_COUNT: 20, // Default number of posts to sync
+  DEFAULT_RECENT_COUNT: 200, // Default number of posts to sync (increased from 20 for better coverage)
   BATCH_SIZE: 10,
-  MAX_RETRIES: 10, // Increased from 3 to 10 for persistent rate limit handling
+  MAX_RETRIES: 10, // Max retry attempts for transient errors
+  RETRY_DELAYS: [1000, 2000, 4000, 5000, 5000, 5000, 5000, 5000, 5000, 5000], // Capped exponential backoff (ms)
   TIMEOUT: 30000,
   CACHE_TTL: 900000, // 15 minutes in milliseconds
 };

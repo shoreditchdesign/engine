@@ -1,13 +1,16 @@
-import "dotenv/config";
-import { promises as fs } from "fs";
-import { fileURLToPath } from "url";
-import { dirname, join } from "path";
-import { listItems, updateItem, preloadAllItems } from "../lib/api/webflow.js";
-import { WEBFLOW_COLLECTIONS, FIELD_MAPPING } from "../config/constants.js";
-import { logWithTimestamp, categorizeError } from "../lib/utils.js";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
+require("dotenv").config();
+const fs = require("fs").promises;
+const path = require("path");
+const {
+  listItems,
+  updateItem,
+  preloadAllItems,
+} = require("../../lib/api/webflow.js");
+const {
+  WEBFLOW_COLLECTIONS,
+  FIELD_MAPPING,
+} = require("../../config/constants.js");
+const { categorizeError } = require("../../lib/utils.js");
 
 // Type IDs for News Category collection
 const CATEGORY_TYPE_IDS = {
@@ -16,14 +19,15 @@ const CATEGORY_TYPE_IDS = {
 };
 
 /**
- * Archive articles older than 60 days based on last-updated date
+ * Archive articles older than 60 days based on published date
  * ONLY archives articles with category type "Updates"
  * Articles are unpublished and marked as archived
+ * @param {object} context - Azure Function context for logging
  * @param {number} daysThreshold - Number of days after which to archive (default: 60)
  * @returns {Promise<object>} - Archive summary
  */
-export async function runArchive(daysThreshold = 60) {
-  console.log(`\nStarting archive (${daysThreshold}+ days, Updates only)...\n`);
+async function runArchive(context, daysThreshold = 60) {
+  context.log(`\nStarting archive (${daysThreshold}+ days, Updates only)...\n`);
 
   const summary = {
     archived: [],
@@ -43,7 +47,7 @@ export async function runArchive(daysThreshold = 60) {
     cutoffDate.setDate(cutoffDate.getDate() - daysThreshold);
 
     // 1. Preload all categories once for O(1) lookups
-    logWithTimestamp("Preloading categories...", "info");
+    context.log("Preloading categories...");
     const categoryCache = new Map(); // { categoryId: { name, type } }
     let categoryOffset = 0;
     const categoryLimit = 100;
@@ -82,13 +86,13 @@ export async function runArchive(daysThreshold = 60) {
       categoryOffset += categoryLimit;
     }
 
-    logWithTimestamp(`Preloaded ${categoryCache.size} categories`, "info");
+    context.log(`Preloaded ${categoryCache.size} categories`);
 
     // 2. Preload all articles from Webflow
     const allArticlesMap = await preloadAllItems();
     const allArticles = Array.from(allArticlesMap.values());
 
-    logWithTimestamp(`Preloaded ${allArticles.length} articles`, "info");
+    context.log(`Preloaded ${allArticles.length} articles`);
 
     // 3. Filter articles in memory that need archiving
     const articlesToArchive = allArticles.filter((item) => {
@@ -150,11 +154,7 @@ export async function runArchive(daysThreshold = 60) {
 
     summary.totalChecked = allArticles.length;
 
-    logWithTimestamp(
-      `Found ${articlesToArchive.length} articles to archive`,
-      "info",
-    );
-    console.log();
+    context.log(`Found ${articlesToArchive.length} articles to archive\n`);
 
     // 4. Sort by published date (oldest first)
     articlesToArchive.sort((a, b) => {
@@ -198,9 +198,24 @@ export async function runArchive(daysThreshold = 60) {
           daysOld,
         });
 
-        console.log(
+        context.log(
           `✓ [${articleNum}/${articlesToArchive.length}] ARCHIVED: "${title}" (ID: ${postId}) - ${daysOld} days old`,
         );
+
+        // Log individual article archived event to Application Insights
+        if (context.log) {
+          context.log({
+            eventName: "ArticleArchived",
+            properties: {
+              postId: postId,
+              title: title,
+              category: category.name,
+              publishedDate: articleDate.toISOString(),
+              daysOld: daysOld,
+              daysThreshold: daysThreshold,
+            },
+          });
+        }
       } catch (archiveError) {
         const errorInfo = categorizeError(archiveError);
 
@@ -212,7 +227,7 @@ export async function runArchive(daysThreshold = 60) {
           errorCategory: errorInfo.category,
         });
 
-        console.log(
+        context.log(
           `✗ [${articleNum}/${articlesToArchive.length}] ERROR: "${title}" (ID: ${postId}) - ${archiveError.message}`,
         );
       }
@@ -221,7 +236,7 @@ export async function runArchive(daysThreshold = 60) {
       if (processedCount % 50 === 0) {
         const elapsedSec = ((Date.now() - startTime) / 1000).toFixed(1);
         const rate = (processedCount / elapsedSec).toFixed(2);
-        console.log(
+        context.log(
           `\nProgress: ${processedCount}/${articlesToArchive.length} | Rate: ${rate} articles/sec | Elapsed: ${elapsedSec}s\n`,
         );
       }
@@ -229,7 +244,7 @@ export async function runArchive(daysThreshold = 60) {
 
     // Write archived articles to log file
     if (summary.archived.length > 0) {
-      await writeArchiveLog(summary.archived, daysThreshold);
+      await writeArchiveLog(context, summary.archived, daysThreshold);
     }
 
     // Final summary
@@ -241,31 +256,39 @@ export async function runArchive(daysThreshold = 60) {
         ? `archived-${new Date().toISOString().split("T")[0]}.log`
         : null;
 
-    console.log(`\nARCHIVE COMPLETE`);
-    console.log(
+    // Log metrics to Application Insights
+    if (context.log && context.log.metric) {
+      context.log.metric("ArchiveTotalChecked", summary.totalChecked);
+      context.log.metric("ArchiveArchivedCount", summary.archived.length);
+      context.log.metric("ArchiveSkippedCount", summary.skipped.length);
+      context.log.metric("ArchiveErrorCount", summary.errors.length);
+      context.log.metric("ArchiveDurationSeconds", parseFloat(totalTime));
+      context.log.metric("ArchiveDaysThreshold", daysThreshold);
+    }
+
+    context.log(`\nARCHIVE COMPLETE`);
+    context.log(
       `Checked: ${summary.totalChecked.toString().padEnd(4)} | Archived: ${summary.archived.length.toString().padEnd(4)} | Skipped: ${summary.skipped.length.toString().padEnd(4)} | Warnings: ${summary.warnings.length.toString().padEnd(4)} | Errors: ${summary.errors.length.toString().padEnd(4)} | Time: ${totalTime.padEnd(6)}s | Rate: ${avgRate.padEnd(5)}/s${logFileName ? ` | Log: /logs/${logFileName}` : ""}`,
     );
-    console.log();
+    context.log();
 
     // Log warnings if any
     if (summary.warnings.length > 0) {
-      console.log(`Warnings (${summary.warnings.length}):`);
+      context.log(`Warnings (${summary.warnings.length}):`);
       summary.warnings.forEach((warn, idx) => {
-        console.log(`  ${idx + 1}. ${warn.postId || warn.message}`);
+        context.log(`  ${idx + 1}. ${warn.postId || warn.message}`);
       });
-      console.log();
     }
 
     // Log errors if any
     if (summary.errors.length > 0) {
-      console.log(`Failed articles (${summary.errors.length}):`);
+      context.log(`Failed articles (${summary.errors.length}):`);
       summary.errorDetails.forEach((err, idx) => {
-        console.log(`  ${idx + 1}. ${err.postId}: ${err.error}`);
+        context.log(`  ${idx + 1}. ${err.postId}: ${err.error}`);
       });
-      console.log();
     }
   } catch (error) {
-    logWithTimestamp(`Archive failed: ${error.message}`, "error");
+    context.log.error(`Archive failed: ${error.message}`);
     summary.errorDetails.push({ generalError: error.message });
     throw error;
   }
@@ -275,13 +298,14 @@ export async function runArchive(daysThreshold = 60) {
 
 /**
  * Write archived articles to a log file
+ * @param {object} context - Azure Function context
  * @param {Array} archivedArticles - Array of archived article objects
  * @param {number} daysThreshold - Days threshold used for archiving
  */
-async function writeArchiveLog(archivedArticles, daysThreshold) {
-  const logDir = join(__dirname, "..", "logs");
-  const today = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
-  const logFilePath = join(logDir, `archived-${today}.log`);
+async function writeArchiveLog(context, archivedArticles, daysThreshold) {
+  const logDir = path.join(__dirname, "..", "..", "logs");
+  const today = new Date().toISOString().split("T")[0];
+  const logFilePath = path.join(logDir, `archived-${today}.log`);
 
   const logData = {
     timestamp: new Date().toISOString(),
@@ -297,25 +321,33 @@ async function writeArchiveLog(archivedArticles, daysThreshold) {
   };
 
   try {
-    // Ensure /local directory exists
+    // Ensure /logs directory exists
     await fs.mkdir(logDir, { recursive: true });
-
-    // Write log file
     await fs.writeFile(logFilePath, JSON.stringify(logData, null, 2), "utf-8");
   } catch (error) {
-    logWithTimestamp(`Failed to write archive log: ${error.message}`, "warn");
+    context.log.warn(`Failed to write archive log: ${error.message}`);
   }
 }
 
 /**
- * Vercel serverless function handler
- * @param {object} req - Request object
- * @param {object} res - Response object
+ * Azure Function handler
+ * Supports both timer trigger (automated daily) and HTTP trigger (manual)
  */
-export default async function handler(req, res) {
+module.exports = async function (context, req) {
+  // Determine trigger type
+  const isTimerTrigger = context.bindings.myTimer !== undefined;
+  const triggerType = isTimerTrigger ? "Timer" : "HTTP";
+
+  context.log(`Archive function triggered by ${triggerType}`);
+
   try {
-    // Allow custom days threshold from request body (for manual archives)
-    const daysThreshold = req.body?.daysThreshold || 90;
+    // Allow custom days threshold from request body or query (for manual HTTP archives)
+    // Timer triggers will use default 60 days
+    const daysThreshold = isTimerTrigger
+      ? 60
+      : req.body?.daysThreshold ||
+        (req.query.daysThreshold ? parseInt(req.query.daysThreshold) : null) ||
+        60;
 
     // Validate days threshold
     if (
@@ -323,45 +355,43 @@ export default async function handler(req, res) {
       daysThreshold < 1 ||
       daysThreshold > 365
     ) {
-      return res.status(400).json({
-        success: false,
-        error: "Invalid daysThreshold. Must be a number between 1 and 365.",
-      });
+      context.res = {
+        status: 400,
+        headers: { "Content-Type": "application/json" },
+        body: {
+          success: false,
+          error: "Invalid daysThreshold. Must be a number between 1 and 365.",
+        },
+      };
+      return;
     }
 
     // Run archive
-    const summary = await runArchive(daysThreshold);
+    const summary = await runArchive(context, daysThreshold);
 
-    return res.status(200).json({
-      success: true,
-      ...summary,
-      timestamp: new Date().toISOString(),
-      daysThreshold,
-    });
+    // Set HTTP response (for HTTP triggers)
+    context.res = {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+      body: {
+        success: true,
+        ...summary,
+        timestamp: new Date().toISOString(),
+        daysThreshold,
+        triggerType,
+      },
+    };
   } catch (error) {
-    logWithTimestamp(`Archive handler failed: ${error.message}`, "error");
-    return res.status(500).json({
-      success: false,
-      error: error.message,
-      timestamp: new Date().toISOString(),
-    });
+    context.log.error(`Archive handler failed: ${error.message}`);
+    context.res = {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+      body: {
+        success: false,
+        error: error.message,
+        timestamp: new Date().toISOString(),
+        triggerType,
+      },
+    };
   }
-}
-
-/**
- * CLI execution handler
- * Run with: npm run archive [days]
- * Example: npm run archive 60
- */
-if (import.meta.url === `file://${process.argv[1]}`) {
-  const daysThreshold = parseInt(process.argv[2]) || 90;
-
-  runArchive(daysThreshold)
-    .then((summary) => {
-      process.exit(summary.errors.length > 0 ? 1 : 0);
-    })
-    .catch((error) => {
-      console.error(`Fatal error: ${error.message}`);
-      process.exit(1);
-    });
-}
+};
