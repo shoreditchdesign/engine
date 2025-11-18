@@ -1,0 +1,57 @@
+# Azure Functions ignore file
+# Files and directories that should not be deployed
+
+.git*
+.vscode
+.DS_Store
+*.log
+
+# Local settings (contains secrets)
+local.settings.json
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Node modules (will be installed on Azure)
+node_modules/
+
+# Migration data (too large, not needed on Azure)
+migrate/export.csv
+migrate/export.json
+
+# Local test data and logs
+local/*.log
+local/test.json
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Public assets (not needed for functions)
+public/
+
+# Old API directory (if kept for reference)
+api/
+
+# Test files
+test/
+*.test.js
+*.spec.js
+
+# Build artifacts
+dist/
+build/
+bin/
+obj/
+
+# Azure specific
+.azure/
+
+# IDE
+.idea/
+*.swp
+*.swo
+*~
