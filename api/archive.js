@@ -2,7 +2,7 @@ import "dotenv/config";
 import { promises as fs } from "fs";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
-import { listItems, updateItem, preloadAllItems } from "../lib/api/webflow.js";
+import { listItems, deleteItem, preloadAllItems } from "../lib/api/webflow.js";
 import { WEBFLOW_COLLECTIONS, FIELD_MAPPING } from "../config/constants.js";
 import { logWithTimestamp, categorizeError, delay } from "../lib/utils.js";
 
@@ -16,17 +16,19 @@ const CATEGORY_TYPE_IDS = {
 };
 
 /**
- * Archive articles older than 60 days based on last-updated date
- * ONLY archives articles with category type "Updates"
- * Articles are unpublished and marked as archived
- * @param {number} daysThreshold - Number of days after which to archive (default: 60)
- * @returns {Promise<object>} - Archive summary
+ * Delete articles older than 60 days based on published date
+ * ONLY deletes articles with category type "Updates"
+ * Articles are permanently deleted from Webflow
+ * @param {number} daysThreshold - Number of days after which to delete (default: 60)
+ * @returns {Promise<object>} - Delete summary
  */
 export async function runArchive(daysThreshold = 60) {
-  console.log(`\nStarting archive (${daysThreshold}+ days, Updates only)...\n`);
+  console.log(
+    `\nStarting deletion (${daysThreshold}+ days, Updates only)...\n`,
+  );
 
   const summary = {
-    archived: [],
+    deleted: [],
     skipped: [],
     errors: [],
     errorDetails: [],
@@ -90,19 +92,12 @@ export async function runArchive(daysThreshold = 60) {
 
     logWithTimestamp(`Preloaded ${allArticles.length} articles`, "info");
 
-    // 3. Filter articles in memory that need archiving
-    const articlesToArchive = allArticles.filter((item) => {
+    // 3. Filter articles in memory that need deletion
+    const articlesToDelete = allArticles.filter((item) => {
       const postId = item.fieldData?.[FIELD_MAPPING.postId.webflowField];
       const publishedDate =
         item.fieldData?.[FIELD_MAPPING.timestamp.webflowField];
       const categoryId = item.fieldData?.[FIELD_MAPPING.cat.webflowField];
-      const isArchived = item.isArchived || false;
-
-      // Skip if already archived
-      if (isArchived) {
-        summary.skipped.push({ postId, reason: "already_archived" });
-        return false;
-      }
 
       // Skip if missing published date
       if (!publishedDate) {
@@ -133,7 +128,7 @@ export async function runArchive(daysThreshold = 60) {
         return false;
       }
 
-      // Check if old enough to archive based on published date
+      // Check if old enough to delete based on published date
       const articleDate = new Date(publishedDate);
       const isOld = articleDate < cutoffDate;
 
@@ -145,27 +140,27 @@ export async function runArchive(daysThreshold = 60) {
         return false;
       }
 
-      return true; // Include in articles to archive
+      return true; // Include in articles to delete
     });
 
     summary.totalChecked = allArticles.length;
 
     logWithTimestamp(
-      `Found ${articlesToArchive.length} articles to archive`,
+      `Found ${articlesToDelete.length} articles to delete`,
       "info",
     );
     console.log();
 
     // 4. Sort by published date (oldest first)
-    articlesToArchive.sort((a, b) => {
+    articlesToDelete.sort((a, b) => {
       const dateA = new Date(a.fieldData[FIELD_MAPPING.timestamp.webflowField]);
       const dateB = new Date(b.fieldData[FIELD_MAPPING.timestamp.webflowField]);
       return dateA - dateB;
     });
 
-    // 5. Archive each article
-    for (let i = 0; i < articlesToArchive.length; i++) {
-      const item = articlesToArchive[i];
+    // 5. Delete each article
+    for (let i = 0; i < articlesToDelete.length; i++) {
+      const item = articlesToDelete[i];
       const articleNum = i + 1;
       processedCount++;
 
@@ -183,40 +178,36 @@ export async function runArchive(daysThreshold = 60) {
       );
 
       try {
-        await updateItem(WEBFLOW_COLLECTIONS.NEWS, item.id, {
-          fieldData: item.fieldData,
-          isArchived: true,
-          isDraft: false,
-        });
+        await deleteItem(WEBFLOW_COLLECTIONS.NEWS, item.id);
 
-        summary.archived.push({
+        summary.deleted.push({
           postId,
           itemId: item.id,
           title: title,
           category: category.name,
-          lastUpdated: articleDate.toISOString(),
+          publishedDate: articleDate.toISOString(),
           daysOld,
         });
 
         console.log(
-          `✓ [${articleNum}/${articlesToArchive.length}] ARCHIVED: "${title}" (ID: ${postId}) - ${daysOld} days old`,
+          `✓ [${articleNum}/${articlesToDelete.length}] DELETED: "${title}" (ID: ${postId}) - ${daysOld} days old`,
         );
 
         // Delay to prevent rate limiting
         await delay(1000);
-      } catch (archiveError) {
-        const errorInfo = categorizeError(archiveError);
+      } catch (deleteError) {
+        const errorInfo = categorizeError(deleteError);
 
         summary.errors.push(postId);
         summary.errorDetails.push({
           postId,
           itemId: item.id,
-          error: archiveError.message,
+          error: deleteError.message,
           errorCategory: errorInfo.category,
         });
 
         console.log(
-          `✗ [${articleNum}/${articlesToArchive.length}] ERROR: "${title}" (ID: ${postId}) - ${archiveError.message}`,
+          `✗ [${articleNum}/${articlesToDelete.length}] ERROR: "${title}" (ID: ${postId}) - ${deleteError.message}`,
         );
       }
 
@@ -225,14 +216,14 @@ export async function runArchive(daysThreshold = 60) {
         const elapsedSec = ((Date.now() - startTime) / 1000).toFixed(1);
         const rate = (processedCount / elapsedSec).toFixed(2);
         console.log(
-          `\nProgress: ${processedCount}/${articlesToArchive.length} | Rate: ${rate} articles/sec | Elapsed: ${elapsedSec}s\n`,
+          `\nProgress: ${processedCount}/${articlesToDelete.length} | Rate: ${rate} articles/sec | Elapsed: ${elapsedSec}s\n`,
         );
       }
     }
 
-    // Write archived articles to log file
-    if (summary.archived.length > 0) {
-      await writeArchiveLog(summary.archived, daysThreshold);
+    // Write deleted articles to log file
+    if (summary.deleted.length > 0) {
+      await writeDeleteLog(summary.deleted, daysThreshold);
     }
 
     // Final summary
@@ -240,13 +231,13 @@ export async function runArchive(daysThreshold = 60) {
     const avgRate =
       processedCount > 0 ? (processedCount / totalTime).toFixed(2) : "0.00";
     const logFileName =
-      summary.archived.length > 0
-        ? `archived-${new Date().toISOString().split("T")[0]}.log`
+      summary.deleted.length > 0
+        ? `deleted-${new Date().toISOString().split("T")[0]}.log`
         : null;
 
-    console.log(`\nARCHIVE COMPLETE`);
+    console.log(`\nDELETION COMPLETE`);
     console.log(
-      `Checked: ${summary.totalChecked.toString().padEnd(4)} | Archived: ${summary.archived.length.toString().padEnd(4)} | Skipped: ${summary.skipped.length.toString().padEnd(4)} | Warnings: ${summary.warnings.length.toString().padEnd(4)} | Errors: ${summary.errors.length.toString().padEnd(4)} | Time: ${totalTime.padEnd(6)}s | Rate: ${avgRate.padEnd(5)}/s${logFileName ? ` | Log: /logs/${logFileName}` : ""}`,
+      `Checked: ${summary.totalChecked.toString().padEnd(4)} | Deleted: ${summary.deleted.length.toString().padEnd(4)} | Skipped: ${summary.skipped.length.toString().padEnd(4)} | Warnings: ${summary.warnings.length.toString().padEnd(4)} | Errors: ${summary.errors.length.toString().padEnd(4)} | Time: ${totalTime.padEnd(6)}s | Rate: ${avgRate.padEnd(5)}/s${logFileName ? ` | Log: /logs/${logFileName}` : ""}`,
     );
     console.log();
 
@@ -277,36 +268,36 @@ export async function runArchive(daysThreshold = 60) {
 }
 
 /**
- * Write archived articles to a log file
- * @param {Array} archivedArticles - Array of archived article objects
- * @param {number} daysThreshold - Days threshold used for archiving
+ * Write deleted articles to a log file
+ * @param {Array} deletedArticles - Array of deleted article objects
+ * @param {number} daysThreshold - Days threshold used for deletion
  */
-async function writeArchiveLog(archivedArticles, daysThreshold) {
+async function writeDeleteLog(deletedArticles, daysThreshold) {
   const logDir = join(__dirname, "..", "logs");
   const today = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
-  const logFilePath = join(logDir, `archived-${today}.log`);
+  const logFilePath = join(logDir, `deleted-${today}.log`);
 
   const logData = {
     timestamp: new Date().toISOString(),
     daysThreshold,
-    archivedCount: archivedArticles.length,
-    archived: archivedArticles.map((article) => ({
+    deletedCount: deletedArticles.length,
+    deleted: deletedArticles.map((article) => ({
       postId: article.postId,
       title: article.title,
       category: article.category,
-      lastUpdated: article.lastUpdated,
+      publishedDate: article.publishedDate,
       daysOld: article.daysOld,
     })),
   };
 
   try {
-    // Ensure /local directory exists
+    // Ensure /logs directory exists
     await fs.mkdir(logDir, { recursive: true });
 
     // Write log file
     await fs.writeFile(logFilePath, JSON.stringify(logData, null, 2), "utf-8");
   } catch (error) {
-    logWithTimestamp(`Failed to write archive log: ${error.message}`, "warn");
+    logWithTimestamp(`Failed to write deletion log: ${error.message}`, "warn");
   }
 }
 
