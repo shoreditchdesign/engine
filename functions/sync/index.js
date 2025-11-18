@@ -1,24 +1,21 @@
-require("dotenv").config();
-const { getRecentPosts, getPostById } = require("../../lib/api/engine.js");
-const {
+import "dotenv/config";
+import { getRecentPosts, getPostById } from "../../lib/api/engine.js";
+import {
   findItemByPostId,
   preloadAllItems,
   createItem,
   updateItem,
   publishItems,
   createWebflowClient,
-} = require("../../lib/api/webflow.js");
-const ReferenceManager = require("../../lib/reference.js");
-const {
+} from "../../lib/api/webflow.js";
+import ReferenceManager from "../../lib/reference.js";
+import {
   transformEngineToWebflow,
   needsUpdate,
   validateArticle,
-} = require("../../lib/transformer.js");
-const {
-  WEBFLOW_COLLECTIONS,
-  SYNC_CONFIG,
-} = require("../../config/constants.js");
-const { logWithTimestamp, categorizeError } = require("../../lib/utils.js");
+} from "../../lib/transformer.js";
+import { WEBFLOW_COLLECTIONS, SYNC_CONFIG } from "../../config/constants.js";
+import { logWithTimestamp, categorizeError } from "../../lib/utils.js";
 
 /**
  * Core sync logic - reusable by cron and manual triggers
@@ -419,7 +416,7 @@ async function runSync(
  * Azure Function handler
  * Supports both timer trigger (automated) and HTTP trigger (manual)
  */
-module.exports = async function (context, req) {
+export default async function (context, req) {
   // Determine trigger type
   const isTimerTrigger = context.bindings.myTimer !== undefined;
   const triggerType = isTimerTrigger ? "Timer" : "HTTP";
@@ -480,4 +477,4 @@ module.exports = async function (context, req) {
       },
     };
   }
-};
+}

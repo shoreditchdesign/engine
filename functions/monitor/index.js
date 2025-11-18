@@ -1,12 +1,12 @@
-require("dotenv").config();
-const { getRecentPosts } = require("../../lib/api/engine.js");
-const { listItems } = require("../../lib/api/webflow.js");
-const { WEBFLOW_COLLECTIONS } = require("../../config/constants.js");
+import "dotenv/config";
+import { getRecentPosts } from "../../lib/api/engine.js";
+import { listItems } from "../../lib/api/webflow.js";
+import { WEBFLOW_COLLECTIONS } from "../../config/constants.js";
 
 /**
  * Azure Function handler for health monitoring
  */
-module.exports = async function (context, req) {
+export default async function (context, req) {
   context.log("Monitor function triggered");
 
   const startTime = Date.now();
@@ -140,4 +140,4 @@ module.exports = async function (context, req) {
       total_check_time_ms: totalCheckTime,
     },
   };
-};
+}

@@ -1,16 +1,13 @@
-require("dotenv").config();
-const fs = require("fs").promises;
-const path = require("path");
-const {
+import "dotenv/config";
+import { promises as fs } from "fs";
+import path from "path";
+import {
   listItems,
   updateItem,
   preloadAllItems,
-} = require("../../lib/api/webflow.js");
-const {
-  WEBFLOW_COLLECTIONS,
-  FIELD_MAPPING,
-} = require("../../config/constants.js");
-const { categorizeError } = require("../../lib/utils.js");
+} from "../../lib/api/webflow.js";
+import { WEBFLOW_COLLECTIONS, FIELD_MAPPING } from "../../config/constants.js";
+import { categorizeError } from "../../lib/utils.js";
 
 // Type IDs for News Category collection
 const CATEGORY_TYPE_IDS = {
@@ -333,7 +330,7 @@ async function writeArchiveLog(context, archivedArticles, daysThreshold) {
  * Azure Function handler
  * Supports both timer trigger (automated daily) and HTTP trigger (manual)
  */
-module.exports = async function (context, req) {
+export default async function (context, req) {
   // Determine trigger type
   const isTimerTrigger = context.bindings.myTimer !== undefined;
   const triggerType = isTimerTrigger ? "Timer" : "HTTP";
@@ -394,4 +391,4 @@ module.exports = async function (context, req) {
       },
     };
   }
-};
+}

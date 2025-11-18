@@ -1,20 +1,24 @@
-require("dotenv").config();
-const fs = require("fs").promises;
-const path = require("path");
-const {
+import "dotenv/config";
+import { promises as fs } from "fs";
+import path from "path";
+import { fileURLToPath } from "url";
+import {
   createItem,
   updateItem,
   publishItems,
   createWebflowClient,
   preloadAllItems,
-} = require("../../lib/api/webflow.js");
-const ReferenceManager = require("../../lib/reference.js");
-const {
+} from "../../lib/api/webflow.js";
+import ReferenceManager from "../../lib/reference.js";
+import {
   transformEngineToWebflow,
   needsUpdate,
   validateArticle,
-} = require("../../lib/transformer.js");
-const { WEBFLOW_COLLECTIONS } = require("../../config/constants.js");
+} from "../../lib/transformer.js";
+import { WEBFLOW_COLLECTIONS } from "../../config/constants.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 /**
  * Load migration articles from migrate/export.json file
@@ -239,7 +243,7 @@ async function runMigration(context, options = {}) {
 /**
  * Azure Function handler
  */
-module.exports = async function (context, req) {
+export default async function (context, req) {
   context.log("Migration function triggered");
 
   try {
@@ -276,4 +280,4 @@ module.exports = async function (context, req) {
       },
     };
   }
-};
+}
