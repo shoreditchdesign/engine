@@ -127,7 +127,7 @@ Add secrets to: **Settings → Secrets and variables → Actions**
 npm run sync              # Sync 200 recent articles
 npm run sync 50           # Sync 50 recent articles
 npm run archive           # Delete 60+ day old Updates
-npm run archive 90        # Delete 90+ day old Updates
+npm run archive 90        # Delete 90+ day old Updates (custom threshold)
 npm run migrate           # Bulk migrate from migrate/export.json
 npm run monitor           # Check API health
 ```

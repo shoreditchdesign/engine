@@ -324,7 +324,7 @@ async function writeDeleteLog(deletedArticles, daysThreshold) {
 export default async function handler(req, res) {
   try {
     // Allow custom days threshold from request body (for manual archives)
-    const daysThreshold = req.body?.daysThreshold || 90;
+    const daysThreshold = req.body?.daysThreshold || 60;
 
     // Validate days threshold
     if (
