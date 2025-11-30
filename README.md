@@ -2,22 +2,63 @@
 
 Automated synchronization system that syncs news articles from Engine CMS to Webflow CMS using GitHub Actions.
 
-## Overview
+## Architecture Overview
 
-This system automatically syncs news articles from the Engine API to Webflow CMS and archives old articles on a schedule.
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                       GitHub Actions (Scheduler)                 │
+│  ┌──────────────────────┐      ┌─────────────────────────────┐ │
+│  │  Sync Workflow       │      │  Archive Workflow           │ │
+│  │  (Every 15 mins)     │      │  (Daily 2 AM UTC)           │ │
+│  └──────────┬───────────┘      └──────────┬──────────────────┘ │
+└─────────────┼────────────────────────────┼─────────────────────┘
+              │                             │
+              ▼                             ▼
+    ┌─────────────────┐          ┌──────────────────┐
+    │   api/sync.js   │          │  api/archive.js  │
+    └────────┬────────┘          └────────┬─────────┘
+             │                            │
+             ├────────────────────────────┤
+             │                            │
+    ┌────────▼──────────────────────────┐ │
+    │    lib/transformer.js             │ │
+    │    - Field mapping                │ │
+    │    - HTML sanitization            │ │
+    │    - Slug generation              │ │
+    └────────┬──────────────────────────┘ │
+             │                            │
+    ┌────────▼──────────┐  ┌──────────────▼─────────┐
+    │  lib/reference.js │  │   lib/api/webflow.js   │
+    │  - Category cache │  │   - CRUD operations    │
+    │  - Auto-create    │  │   - Rate limiting      │
+    └────────┬──────────┘  │   - Preload items      │
+             │             └─────────┬────────────┬──┘
+             │                       │            │
+    ┌────────▼───────────┐          │            │
+    │ lib/api/engine.js  │          │            │
+    │ - GetRecentPostsV2 │          │            │
+    │ - GetPostById      │          │            │
+    └────────┬───────────┘          │            │
+             │                       │            │
+             ▼                       ▼            ▼
+    ┌────────────────┐     ┌─────────────────────────┐
+    │   Engine API   │     │     Webflow CMS API     │
+    │   (Source)     │     │     (Destination)       │
+    └────────────────┘     └─────────────────────────┘
+```
 
-### Key Features
-- **Automatic Sync**: Scheduled via GitHub Actions
-- **Archive Old Articles**: Archives "Updates" category articles older than 90 days
-- **Smart Updates**: Only syncs when content has changed
-- **Error Handling**: Retry logic with exponential backoff
+## Key Features
+- **Automatic Sync**: Runs every 15 minutes via GitHub Actions
+- **Smart Updates**: Only syncs when `updatedDate` field changes
+- **Auto-Archive**: Deletes old "Updates" articles (60+ days) daily
+- **Error Recovery**: Retry logic with exponential backoff
 - **Rate Limiting**: Automatic Webflow API rate limit handling
-- **Performance Optimized**: Preloads all items for O(1) lookups
+- **Performance**: Preloads all items for O(1) lookups (~18K→90 API calls)
 
-### Technology Stack
+## Technology Stack
 - **Runtime**: Node.js 20.x
 - **Platform**: GitHub Actions
-- **API Client**: node-fetch
+- **APIs**: Engine API, Webflow CMS API v2
 - **Module System**: ES Modules
 
 ---
@@ -27,25 +68,26 @@ This system automatically syncs news articles from the Engine API to Webflow CMS
 ```
 brochuresync/
 ├── api/                    # Main scripts
-│   ├── sync.js            # Sync recent articles from Engine to Webflow
-│   ├── archive.js         # Archive old "Updates" articles
-│   ├── monitor.js         # Health check for APIs
-│   └── migrate.js         # Bulk migration from CSV
+│   ├── sync.js            # Sync recent articles (200 default)
+│   ├── archive.js         # Delete old "Updates" articles
+│   ├── migrate.js         # Bulk migration from JSON
+│   └── monitor.js         # API health check
 │
-├── lib/                    # Core business logic
+├── lib/                    # Core logic
 │   ├── api/
 │   │   ├── engine.js      # Engine API client
-│   │   └── webflow.js     # Webflow API client
-│   ├── reference.js       # Category/tag manager
-│   ├── transformer.js     # Data transformation
-│   └── utils.js           # Utilities
+│   │   └── webflow.js     # Webflow API client (v2)
+│   ├── reference.js       # Category manager (cached)
+│   ├── transformer.js     # Field mapping & sanitization
+│   ├── converter.js       # CSV to JSON converter
+│   └── utils.js           # Error handling & retry logic
 │
 ├── config/
-│   └── constants.js       # API endpoints, field mappings
+│   └── constants.js       # API endpoints, field mappings, retry config
 │
-├── .github/workflows/     # GitHub Actions workflows
-│   ├── sync.yml          # Scheduled sync job
-│   └── archive.yml       # Scheduled archive job
+├── .github/workflows/
+│   ├── sync.yml          # 15-min sync schedule
+│   └── archive.yml       # Daily archive schedule
 │
 └── package.json
 ```
@@ -60,102 +102,34 @@ brochuresync/
 npm install
 ```
 
-### 2. Configure Environment Variables
+### 2. Environment Variables
 
-Create a `.env` file in the root directory:
+Create `.env`:
 
 ```bash
-# Node Environment
 NODE_ENV=production
-
-# Webflow API Configuration
-WEBFLOW_API_TOKEN=your_token_here
+WEBFLOW_API_TOKEN=your_token
 WEBFLOW_SITE_ID=your_site_id
-
-# Webflow Collection IDs
 WEBFLOW_NEWS_COLLECTION_ID=collection_id
 WEBFLOW_NEWS_CATEGORY_COLLECTION_ID=category_collection_id
 WEBFLOW_NEWS_TAG_COLLECTION_ID=tag_collection_id
 ```
 
-**How to get these values:**
-1. **WEBFLOW_API_TOKEN**: Webflow Dashboard → Account Settings → Apps & Integrations
-2. **WEBFLOW_SITE_ID**: Webflow Designer → Site Settings → General
-3. **Collection IDs**: Webflow Designer → CMS → Collection URL
-
 ### 3. GitHub Actions Secrets
 
-Add the following secrets to your GitHub repository:
-- Go to Settings → Secrets and variables → Actions → New repository secret
-- Add each environment variable from your `.env` file
+Add secrets to: **Settings → Secrets and variables → Actions**
 
 ---
 
 ## Usage
 
-### Local Testing
-
-**Sync articles:**
 ```bash
-npm run sync          # Syncs default 20 recent articles
-npm run sync 5        # Syncs 5 recent articles
-```
-
-**Archive old articles:**
-```bash
-npm run archive       # Archives articles older than 90 days
-npm run archive 60    # Archives articles older than 60 days
-```
-
-**Monitor API health:**
-```bash
-npm run monitor       # Checks Engine and Webflow API connectivity
-```
-
-**Bulk migration:**
-```bash
-npm run migrate       # Migrates articles from migrate/export.json
-```
-
----
-
-## Functions
-
-### Sync (`api/sync.js`)
-
-Syncs recent articles from Engine API to Webflow CMS.
-
-**What it does:**
-1. Preloads all existing Webflow items for fast lookups
-2. Fetches recent articles from Engine API
-3. For each article:
-   - Validates required fields
-   - Checks if it exists in Webflow
-   - Skips if no changes detected
-   - Creates or updates article if needed
-   - Ensures categories and tags exist
-   - Auto-publishes to live site
-
-**Output:**
-```
-SYNC COMPLETE
-Total: 20   | Created: 2    | Updated: 3    | Skipped: 15   | Warnings: 0    | Errors: 0    | Time: 25.3  s | Rate: 0.79 /s
-```
-
-### Archive (`api/archive.js`)
-
-Archives old "Updates" category articles.
-
-**What it does:**
-1. Preloads all categories and articles
-2. Filters for "Updates" category articles older than threshold
-3. Archives each article (unpublishes and marks as archived)
-4. Writes log file to `/logs/archived-YYYY-MM-DD.log`
-
-**Output:**
-```
-ARCHIVE COMPLETE
-Checked: 8476 | Archived: 12   | Skipped: 8464 | Warnings: 0    | Errors: 0    | Time: 35.2  s
+npm run sync              # Sync 200 recent articles
+npm run sync 50           # Sync 50 recent articles
+npm run archive           # Delete 60+ day old Updates
+npm run archive 90        # Delete 90+ day old Updates
+npm run migrate           # Bulk migrate from migrate/export.json
+npm run monitor           # Check API health
 ```
 
 ---
@@ -164,97 +138,102 @@ Checked: 8476 | Archived: 12   | Skipped: 8464 | Warnings: 0    | Errors: 0    |
 
 ### Field Mapping (Engine → Webflow)
 
-| Engine Field | Webflow Field | Transform |
-|--------------|---------------|-----------|
-| `postId` | `postid` | None |
-| `title` | `name` | None |
-| `slug` | `slug` | Sanitized |
-| `content` | `content` | HTML sanitized |
-| `desc` | `desc` | None |
-| `timestamp` | `published` | ISO 8601 |
-| `updatedDate` | `last-updated` | ISO 8601 |
-| `cat` | `category` | Reference ID |
-| `tags` | `tags` | Reference IDs (array) |
-| `color` | `category-color` | None |
-| `isFeatured` | `featured` | Boolean |
-| `isRecurring` | `recurring` | Boolean |
-| `featuredImageBig` | `featured-img-big` | URL |
-| `featuredImageSmall` | `featured-img-small` | URL |
+| Engine Field | Webflow Field | Required | Transform |
+|--------------|---------------|----------|-----------|
+| `postId` | `postid` | ✅ | String |
+| `title` | `name` | ✅ | None |
+| `slug` | `slug` | ✅ | Sanitized, hashed on conflict |
+| `content` | `content` | ❌ | HTML sanitized |
+| `desc` | `desc` | ❌ | None |
+| `timestamp` | `published` | ✅ | ISO 8601 |
+| `updatedDate` | `last-updated` | ❌ | ISO 8601 |
+| `cat` | `category` | ✅ | Reference ID (auto-created) |
+| `tags` | `tags` | ❌ | Reference IDs (auto-created) |
+| `color` | `category-color` | ❌ | Hex code |
+| `isFeatured` | `featured` | ❌ | Boolean |
+| `isRecurring` | `recurring` | ❌ | Boolean |
+| `featuredImageBig` | `featured-img-big` | ❌ | URL |
+| `featuredImageSmall` | `featured-img-small` | ❌ | URL |
+| _(auto)_ | `last-synced` | ✅ | ISO 8601 |
+| _(auto)_ | `sync-status` | ✅ | "Synced" |
+
+### Sync Logic (`api/sync.js`)
+
+1. Preload all Webflow items → Map by `postId`
+2. Fetch 200 recent articles from Engine API
+3. For each article:
+   - Check if exists (O(1) lookup)
+   - Compare `updatedDate` → skip if unchanged
+   - Fetch full content via `GetPostById`
+   - Ensure category exists (cached, auto-create)
+   - Ensure tags exist (parallel, auto-create)
+   - Transform to Webflow format
+   - Create or update → publish
+   - Handle errors (slug conflicts, image imports)
+
+### Archive Logic (`api/archive.js`)
+
+1. Preload all categories + articles
+2. Filter for:
+   - Category type = "Updates" ID
+   - Published date > 60 days old
+3. Delete filtered articles
+4. Publish site (trigger SEO re-crawl)
+5. Write log: `/logs/deleted-YYYY-MM-DD.log`
 
 ---
 
 ## GitHub Actions
 
-### Automated Schedules
+### Sync Workflow
+- **Schedule**: `*/15 * * * *` (every 15 mins)
+- **Manual**: Workflow dispatch with custom `recent_count`
+- **Default**: 200 articles
 
-**Sync Workflow** (`.github/workflows/sync.yml`)
-- Runs every 15 minutes
-- Syncs 20 most recent articles from Engine
-
-**Archive Workflow** (`.github/workflows/archive.yml`)
-- Runs daily at 2:00 AM UTC
-- Archives "Updates" articles older than 90 days
-
-### Manual Triggers
-
-You can also trigger workflows manually from GitHub:
-1. Go to Actions tab in your repository
-2. Select the workflow (Sync or Archive)
-3. Click "Run workflow"
-4. Optionally adjust parameters
+### Archive Workflow
+- **Schedule**: `0 2 * * *` (daily 2 AM UTC)
+- **Manual**: Workflow dispatch with custom `days_threshold`
+- **Default**: 60 days
 
 ---
 
 ## Error Handling
 
-The system handles common errors gracefully:
+| Error Type | Action |
+|------------|--------|
+| Slug conflict | Retry with 4-char hash appended |
+| Image import failure | Retry without images |
+| Rate limit (429) | Wait 60s, retry (max 10×) |
+| Network error | Exponential backoff: 1s→2s→4s→5s |
+| Auth error (401) | Fail immediately |
+| Validation error (400) | Fail immediately |
 
-- **Slug Conflicts**: Automatically retries with hashed slug
-- **Image Import Failures**: Retries without images and logs warning
-- **Rate Limits**: Waits and retries when Webflow API rate limit hit
-- **Network Errors**: Exponential backoff retry logic
-- **Missing Data**: Validates and skips articles with missing required fields
+**Retry Config**: Max 10 attempts, capped exponential backoff
 
 ---
 
 ## Troubleshooting
 
-### "401 Unauthorized"
-- Check `WEBFLOW_API_TOKEN` is correct
-- Regenerate token in Webflow if needed
-
-### "Collection ID not found"
-- Verify collection IDs match your Webflow CMS
-- Check IDs in Webflow Designer → CMS
-
-### No articles syncing
-- Check Engine API is accessible
-- Verify articles have `updatedDate` field
-- Run `npm run monitor` to check API connectivity
-
-### Articles not publishing
-- Verify API token has publish permissions
-- Check Webflow CMS for draft status
+| Issue | Solution |
+|-------|----------|
+| 401 Unauthorized | Check `WEBFLOW_API_TOKEN` |
+| Collection not found | Verify collection IDs in `.env` |
+| No articles syncing | Check `updatedDate` field in Engine API |
+| Articles not publishing | Verify API token has publish permissions |
+| GitHub Actions failing | Check secrets are set correctly |
 
 ---
 
 ## Development
 
-### Project Dependencies
+**Dependencies:**
+- `node-fetch` - HTTP client
+- `dotenv` - Environment variables
+- `abort-controller` - Request timeouts
 
-```json
-{
-  "abort-controller": "^3.0.0",
-  "dotenv": "^16.3.1",
-  "node-fetch": "^3.3.2"
-}
-```
-
-### Environment Selection
-
-The Engine API endpoint is selected based on `NODE_ENV`:
-- **Production** (`NODE_ENV=production`): `https://feeds.engine.online/api/EngineNews`
-- **Staging** (default): `https://uat-brochure.engine.online/api/EngineNews`
+**Environment Selection:**
+- **Production**: `https://feeds.engine.online/api/EngineNews`
+- **Staging**: `https://uat-brochure.engine.online/api/EngineNews`
 
 ---
 
