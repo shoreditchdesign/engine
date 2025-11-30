@@ -9,7 +9,7 @@ Automated synchronization system that syncs news articles from Engine CMS to Web
 │                       GitHub Actions (Scheduler)                 │
 │  ┌──────────────────────┐      ┌─────────────────────────────┐ │
 │  │  Sync Workflow       │      │  Archive Workflow           │ │
-│  │  (Every 15 mins)     │      │  (Daily 2 AM UTC)           │ │
+│  │  (Every 30 mins)     │      │  (Daily 2 AM UTC)           │ │
 │  └──────────┬───────────┘      └──────────┬──────────────────┘ │
 └─────────────┼────────────────────────────┼─────────────────────┘
               │                             │
@@ -48,7 +48,7 @@ Automated synchronization system that syncs news articles from Engine CMS to Web
 ```
 
 ## Key Features
-- **Automatic Sync**: Runs every 15 minutes via GitHub Actions
+- **Automatic Sync**: Runs every 30 minutes via GitHub Actions
 - **Smart Updates**: Only syncs when `updatedDate` field changes
 - **Auto-Archive**: Deletes old "Updates" articles (60+ days) daily
 - **Error Recovery**: Retry logic with exponential backoff
@@ -86,7 +86,7 @@ brochuresync/
 │   └── constants.js       # API endpoints, field mappings, retry config
 │
 ├── .github/workflows/
-│   ├── sync.yml          # 15-min sync schedule
+│   ├── sync.yml          # 30-min sync schedule
 │   └── archive.yml       # Daily archive schedule
 │
 └── package.json
@@ -186,7 +186,7 @@ npm run monitor           # Check API health
 ## GitHub Actions
 
 ### Sync Workflow
-- **Schedule**: `*/15 * * * *` (every 15 mins)
+- **Schedule**: `*/30 * * * *` (every 30 mins)
 - **Manual**: Workflow dispatch with custom `recent_count`
 - **Default**: 200 articles
 
