@@ -96,15 +96,9 @@ export async function runSync(recentCount = SYNC_CONFIG.DEFAULT_RECENT_COUNT) {
           completeArticle.color,
         );
 
-        // 3f. Ensure tags exist (batch operation)
-        const tagIds = await refManager.ensureTagsExist(
-          completeArticle.tags || [],
-        );
-
-        // 3g. Transform Engine data to Webflow format
+        // 3f. Transform Engine data to Webflow format
         const webflowData = transformEngineToWebflow(completeArticle, {
           categoryId,
-          tagIds,
         });
 
         // 3h. Create or update
@@ -144,7 +138,7 @@ export async function runSync(recentCount = SYNC_CONFIG.DEFAULT_RECENT_COUNT) {
 
               const webflowDataWithHash = transformEngineToWebflow(
                 completeArticle,
-                { categoryId, tagIds },
+                { categoryId },
                 true, // useHashedSlug = true
               );
 
@@ -173,7 +167,7 @@ export async function runSync(recentCount = SYNC_CONFIG.DEFAULT_RECENT_COUNT) {
 
               const webflowDataWithoutImages = transformEngineToWebflow(
                 completeArticle,
-                { categoryId, tagIds },
+                { categoryId },
                 false, // useHashedSlug = false
                 false, // excludeSlug = false
                 true, // excludeImages = true
@@ -209,7 +203,7 @@ export async function runSync(recentCount = SYNC_CONFIG.DEFAULT_RECENT_COUNT) {
             // Generate update data WITHOUT slug to avoid Webflow conflicts
             const updateData = transformEngineToWebflow(
               completeArticle,
-              { categoryId, tagIds },
+              { categoryId },
               false, // useHashedSlug = false
               true, // excludeSlug = true (don't send slug on updates)
             );
@@ -242,7 +236,7 @@ export async function runSync(recentCount = SYNC_CONFIG.DEFAULT_RECENT_COUNT) {
 
               const updateDataWithoutImages = transformEngineToWebflow(
                 completeArticle,
-                { categoryId, tagIds },
+                { categoryId },
                 false, // useHashedSlug = false
                 true, // excludeSlug = true
                 true, // excludeImages = true

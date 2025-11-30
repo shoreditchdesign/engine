@@ -231,10 +231,6 @@ npm run monitor           # Check API health
 - `dotenv` - Environment variables
 - `abort-controller` - Request timeouts
 
-**Environment Selection:**
-- **Production**: `https://feeds.engine.online/api/EngineNews`
-- **Staging**: `https://uat-brochure.engine.online/api/EngineNews`
-
 ---
 
 ## License

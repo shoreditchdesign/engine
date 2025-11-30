@@ -27,7 +27,7 @@ export const FIELD_MAPPING = {
   timestamp: { webflowField: "published", required: true },
   updatedDate: { webflowField: "last-updated", required: false }, // Optional - not set if never edited
   cat: { webflowField: "category", required: true },
-  tags: { webflowField: "tags", required: false },
+  // tags: { webflowField: "tags", required: false }, // REMOVED: Tags no longer synced to Webflow
   color: { webflowField: "category-color", required: false },
   isFeatured: { webflowField: "featured", required: false },
   isRecurring: { webflowField: "recurring", required: false },

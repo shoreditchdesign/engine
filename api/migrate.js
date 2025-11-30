@@ -131,19 +131,15 @@ export async function runMigration(options = {}) {
           continue;
         }
 
-        // 2d. Article needs creation or update - ensure category and tags exist
+        // 2d. Article needs creation or update - ensure category exists
         const categoryId = await refManager.ensureCategoryExists(
           article.cat,
           article.color,
         );
 
-        // 2e. Ensure tags exist (batch operation)
-        const tagIds = await refManager.ensureTagsExist(article.tags || []);
-
-        // 2f. Transform Engine data to Webflow format
+        // 2e. Transform Engine data to Webflow format
         const webflowData = transformEngineToWebflow(article, {
           categoryId,
-          tagIds,
         });
 
         // 2g. Create or update
@@ -182,7 +178,6 @@ export async function runMigration(options = {}) {
                 article,
                 {
                   categoryId,
-                  tagIds,
                 },
                 true,
               ); // Pass true to append hash to slug
@@ -207,7 +202,7 @@ export async function runMigration(options = {}) {
           // Update existing article
           const updateData = transformEngineToWebflow(
             article,
-            { categoryId, tagIds },
+            { categoryId },
             false,
             true, // excludeSlug = true
           );
