@@ -363,7 +363,7 @@ export default async function handler(req, res) {
  * Example: npm run archive 60
  */
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const daysThreshold = parseInt(process.argv[2]) || 90;
+  const daysThreshold = parseInt(process.argv[2]) || 60;
 
   runArchive(daysThreshold)
     .then((summary) => {
