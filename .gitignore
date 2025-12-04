@@ -125,8 +125,5 @@ logs/*.log
 checklist.md
 summary.md
 
-# Webflow API docs
-docs/data.md
-
 # Deployment documentation with sensitive Azure details
 DEPLOYMENT_BLOCKERS.md
