@@ -34,6 +34,9 @@ export async function runSync(recentCount = SYNC_CONFIG.DEFAULT_RECENT_COUNT) {
     warnings: [],
   };
 
+  // Track Webflow item IDs for batch republish failsafe
+  const createdItemIds = [];
+
   let processedCount = 0;
   let startTime = Date.now();
 
@@ -114,6 +117,7 @@ export async function runSync(recentCount = SYNC_CONFIG.DEFAULT_RECENT_COUNT) {
             // Publish immediately
             await publishItems(WEBFLOW_COLLECTIONS.NEWS, [createdItem.id]);
             summary.created.push(completeArticle.postId);
+            createdItemIds.push(createdItem.id);
 
             console.log(
               `✓ [${articleNum}/${totalArticles}] CREATED: "${completeArticle.title}" (ID: ${completeArticle.postId})`,
@@ -150,6 +154,7 @@ export async function runSync(recentCount = SYNC_CONFIG.DEFAULT_RECENT_COUNT) {
 
               await publishItems(WEBFLOW_COLLECTIONS.NEWS, [createdItem.id]);
               summary.created.push(completeArticle.postId);
+              createdItemIds.push(createdItem.id);
 
               console.log(
                 `[${articleNum}/${totalArticles}] CREATED (with hash): "${completeArticle.title}" (ID: ${completeArticle.postId})`,
@@ -181,6 +186,7 @@ export async function runSync(recentCount = SYNC_CONFIG.DEFAULT_RECENT_COUNT) {
 
               await publishItems(WEBFLOW_COLLECTIONS.NEWS, [createdItem.id]);
               summary.created.push(completeArticle.postId);
+              createdItemIds.push(createdItem.id);
               summary.warnings.push({
                 postId: completeArticle.postId,
                 title: completeArticle.title,
@@ -295,7 +301,24 @@ export async function runSync(recentCount = SYNC_CONFIG.DEFAULT_RECENT_COUNT) {
     throw error;
   }
 
-  // 4. Final summary
+  // 4. Batch republish failsafe for all created items
+  if (createdItemIds.length > 0) {
+    try {
+      console.log(
+        `\nRepublishing ${createdItemIds.length} created items as failsafe...`,
+      );
+      await publishItems(WEBFLOW_COLLECTIONS.NEWS, createdItemIds);
+      console.log(`✓ Batch republish completed\n`);
+    } catch (republishError) {
+      logWithTimestamp(
+        `Warning: Batch republish failed - ${republishError.message}`,
+        "warn",
+      );
+      // Don't throw - this is a failsafe, not critical
+    }
+  }
+
+  // 5. Final summary
   const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
   const avgRate =
     processedCount > 0 ? (processedCount / totalTime).toFixed(2) : "0.00";
