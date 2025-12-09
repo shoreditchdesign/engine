@@ -1,7 +1,5 @@
 # Engine-to-Webflow Sync System
 
-Changed Repo Names
-
 Automated synchronization system that syncs news articles from Engine CMS to Webflow CMS using GitHub Actions.
 
 ## Architecture Overview
@@ -71,8 +69,8 @@ Automated synchronization system that syncs news articles from Engine CMS to Web
 brochuresync/
 ├── api/                    # Main scripts
 │   ├── sync.js            # Sync recent articles (200 default)
-│   ├── archive.js         # Delete old "Updates" articles
-│   ├── migrate.js         # Bulk migration from JSON
+│   ├── archive.js         # Delete old "Updates" articles  (60 days default)
+│   ├── migrate.js         # Bulk migration from JSON (Used for historical data migration)
 │   └── monitor.js         # API health check
 │
 ├── lib/                    # Core logic
@@ -89,7 +87,7 @@ brochuresync/
 │
 ├── .github/workflows/
 │   ├── sync.yml          # 30-min sync schedule
-│   └── archive.yml       # Daily archive schedule
+│   └── archive.yml       # Daily archive schedule (2AM)
 │
 └── package.json
 ```
@@ -106,7 +104,7 @@ npm install
 
 ### 2. Environment Variables
 
-Create `.env`:
+Create `.env`: Already added to your GitHub environment variables for Github Action Runs
 
 ```bash
 NODE_ENV=production
@@ -117,13 +115,9 @@ WEBFLOW_NEWS_CATEGORY_COLLECTION_ID=category_collection_id
 WEBFLOW_NEWS_TAG_COLLECTION_ID=tag_collection_id
 ```
 
-### 3. GitHub Actions Secrets
-
-Add secrets to: **Settings → Secrets and variables → Actions**
-
 ---
 
-## Usage
+## Local Usage
 
 ```bash
 npm run sync              # Sync 200 recent articles
@@ -168,7 +162,7 @@ npm run monitor           # Check API health
    - Compare `updatedDate` → skip if unchanged
    - Fetch full content via `GetPostById`
    - Ensure category exists (cached, auto-create)
-   - Ensure tags exist (parallel, auto-create)
+   - Ensure tags exist (deprecated since Dec 2025))
    - Transform to Webflow format
    - Create or update → publish
    - Handle errors (slug conflicts, image imports)
