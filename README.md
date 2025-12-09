@@ -2,50 +2,6 @@
 
 Automated synchronization system that syncs news articles from Engine CMS to Webflow CMS using GitHub Actions.
 
-## Architecture Overview
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                       GitHub Actions (Scheduler)                 │
-│  ┌──────────────────────┐      ┌─────────────────────────────┐ │
-│  │  Sync Workflow       │      │  Archive Workflow           │ │
-│  │  (Every 30 mins)     │      │  (Daily 2 AM UTC)           │ │
-│  └──────────┬───────────┘      └──────────┬──────────────────┘ │
-└─────────────┼────────────────────────────┼─────────────────────┘
-              │                             │
-              ▼                             ▼
-    ┌─────────────────┐          ┌──────────────────┐
-    │   api/sync.js   │          │  api/archive.js  │
-    └────────┬────────┘          └────────┬─────────┘
-             │                            │
-             ├────────────────────────────┤
-             │                            │
-    ┌────────▼──────────────────────────┐ │
-    │    lib/transformer.js             │ │
-    │    - Field mapping                │ │
-    │    - HTML sanitization            │ │
-    │    - Slug generation              │ │
-    └────────┬──────────────────────────┘ │
-             │                            │
-    ┌────────▼──────────┐  ┌──────────────▼─────────┐
-    │  lib/reference.js │  │   lib/api/webflow.js   │
-    │  - Category cache │  │   - CRUD operations    │
-    │  - Auto-create    │  │   - Rate limiting      │
-    └────────┬──────────┘  │   - Preload items      │
-             │             └─────────┬────────────┬──┘
-             │                       │            │
-    ┌────────▼───────────┐          │            │
-    │ lib/api/engine.js  │          │            │
-    │ - GetRecentPostsV2 │          │            │
-    │ - GetPostById      │          │            │
-    └────────┬───────────┘          │            │
-             │                       │            │
-             ▼                       ▼            ▼
-    ┌────────────────┐     ┌─────────────────────────┐
-    │   Engine API   │     │     Webflow CMS API     │
-    │   (Source)     │     │     (Destination)       │
-    └────────────────┘     └─────────────────────────┘
-```
 
 ## Key Features
 - **Automatic Sync**: Runs every 30 minutes via GitHub Actions
