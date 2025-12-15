@@ -1,0 +1,27 @@
+name: Sustain Repository Activity
+
+on:
+  schedule:
+    # Run every 30 days to prevent workflow deactivation
+    - cron: "0 0 */30 * *"
+  workflow_dispatch:
+
+jobs:
+  sustain:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Update sustain timestamp
+        run: |
+          mkdir -p .github
+          date -u > .github/sustain.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add .github/sustain.txt
+          git diff --quiet && git diff --staged --quiet || git commit -m "chore: sustain repository activity [skip ci]"
+          git push
