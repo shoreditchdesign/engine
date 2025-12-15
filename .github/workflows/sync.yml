@@ -3,7 +3,7 @@ name: Sync Engine to Webflow
 on:
   # Scheduled to run every 30 minutes
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "*/100 * * * *"
 
   # Allow manual trigger with custom parameters
   workflow_dispatch:
